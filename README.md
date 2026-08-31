@@ -30,6 +30,8 @@ pnpm preview
 
 “自动演示”可以跳过手动追问，在约 5 秒内直接演示到紧急证据识别结果。
 
+在线演示地址：<https://ment5981.github.io/an-dun-ai-demo/>。推送到 `main` 后，GitHub Actions 会自动重新构建发布。
+
 ## 技术栈
 
 - React 19 + TypeScript + Vite
