@@ -4,14 +4,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node server/index.mjs",
+    "dev:client": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "node server/index.mjs",
+    "test:api": "node scripts/api-smoke.mjs",
+    "test:visual": "node scripts/visual-qa.mjs"
   },
   "dependencies": {
     "@fluentui/react-components": "latest",
     "@fluentui/react-icons": "latest",
+    "express": "^5.2.1",
     "motion": "latest",
+    "multer": "^2.3.0",
     "react": "latest",
     "react-dom": "latest"
   },

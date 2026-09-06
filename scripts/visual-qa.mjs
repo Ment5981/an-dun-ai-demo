@@ -1,75 +1,62 @@
-import { chromium } from "playwright";
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
+import { chromium } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 
 const root = process.cwd();
-const output = path.join(root, "tmp", "qa");
+const output = path.join(root, 'tmp', 'qa');
 await mkdir(output, { recursive: true });
-
-const browser = await chromium.launch({
-  headless: true,
-  executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-});
-
+const executablePath = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const browser = await chromium.launch({ headless: true, executablePath });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const page = await context.newPage();
 const consoleErrors = [];
-const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
-desktop.on("console", (message) => {
-  if (message.type() === "error") consoleErrors.push(message.text());
-});
+page.on('console', message => { if (message.type() === 'error' && !message.text().includes('401')) consoleErrors.push(message.text()); });
 
-await desktop.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
-await desktop.waitForTimeout(450);
-await desktop.screenshot({ path: path.join(output, "01-workbench.png"), fullPage: true });
+async function login() {
+  await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' });
+  await Promise.race([
+    page.getByRole('button', { name: '进入工作台' }).waitFor(),
+    page.getByRole('heading', { name: /案件工作台|我的案件工作台|法务工作台/ }).waitFor(),
+  ]);
+  if (await page.getByRole('button', { name: '进入工作台' }).count()) await page.getByRole('button', { name: '进入工作台' }).click();
+  await page.getByRole('heading', { name: /案件工作台|我的案件工作台|法务工作台/ }).waitFor();
+}
+function assert(condition, message) { if (!condition) throw new Error(message); }
+async function metrics() { return page.evaluate(() => ({ bodyWidth: document.body.scrollWidth, viewportWidth: innerWidth })); }
 
-await desktop.getByRole("button", { name: "AI 智能报案", exact: true }).click();
-await desktop.waitForTimeout(650);
-await desktop.screenshot({ path: path.join(output, "02-intake.png"), fullPage: true });
-await desktop.getByRole("button", { name: "开始智能分析", exact: true }).click();
-await desktop.waitForTimeout(1100);
-await desktop.getByRole("button", { name: "寄件人本人", exact: true }).click();
-await desktop.getByRole("button", { name: "签收后 20 分钟", exact: true }).click();
-await desktop.getByRole("button", { name: "提交关键信息", exact: true }).click();
-await desktop.waitForTimeout(350);
-await desktop.screenshot({ path: path.join(output, "03-emergency.png"), fullPage: true });
-await desktop.getByRole("button", { name: "创建案件并进入工作区", exact: true }).click();
-await desktop.waitForTimeout(650);
-await desktop.screenshot({ path: path.join(output, "04-case.png"), fullPage: true });
-await desktop.getByRole("tab", { name: "风险", exact: true }).click();
-await desktop.waitForTimeout(500);
-await desktop.screenshot({ path: path.join(output, "05-risk.png"), fullPage: true });
-await desktop.getByRole("tab", { name: "概览", exact: true }).click();
-await desktop.waitForTimeout(500);
-await desktop.getByRole("button", { name: "标记已固定", exact: true }).first().click();
-await desktop.getByRole("heading", { name: "分拨中心监控已固定", exact: true }).waitFor();
-await desktop.screenshot({ path: path.join(output, "05b-action-complete.png"), fullPage: true });
-await desktop.getByRole("button", { name: /行动中心/ }).click();
-await desktop.waitForTimeout(650);
-await desktop.screenshot({ path: path.join(output, "06-actions.png"), fullPage: true });
-await desktop.getByRole("button", { name: "管理驾驶舱", exact: true }).click();
-await desktop.waitForTimeout(650);
-await desktop.screenshot({ path: path.join(output, "07-insights.png"), fullPage: true });
+await login();
+await page.waitForTimeout(500);
+await page.screenshot({ path: path.join(output, '01-workbench.png'), fullPage: true });
+const workbenchMetrics = await metrics();
+assert(workbenchMetrics.bodyWidth <= workbenchMetrics.viewportWidth + 1, 'desktop page has horizontal overflow');
 
-const desktopMetrics = await desktop.evaluate(() => ({
-  bodyWidth: document.body.scrollWidth,
-  viewportWidth: document.documentElement.clientWidth,
-  bodyHeight: document.body.scrollHeight,
-  emptyButtons: Array.from(document.querySelectorAll("button")).filter((button) => !button.textContent?.trim() && !button.getAttribute("aria-label")).length,
-  mainOpacity: getComputedStyle(document.querySelector("main > div") ?? document.body).opacity,
-}));
+await page.getByRole('main').getByRole('button', { name: '新建纠纷案件' }).click();
+await page.getByRole('heading', { name: '新建纠纷案件' }).waitFor();
+await page.getByRole('button', { name: '填入演示案情' }).click();
+await page.screenshot({ path: path.join(output, '02-intake.png'), fullPage: true });
 
-const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
-mobile.on("console", (message) => {
-  if (message.type() === "error") consoleErrors.push(message.text());
-});
-await mobile.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
-await mobile.waitForTimeout(750);
-await mobile.screenshot({ path: path.join(output, "08-mobile.png"), fullPage: true });
-const mobileMetrics = await mobile.evaluate(() => ({
-  bodyWidth: document.body.scrollWidth,
-  viewportWidth: document.documentElement.clientWidth,
-  bodyHeight: document.body.scrollHeight,
-  mainOpacity: getComputedStyle(document.querySelector("main > div") ?? document.body).opacity,
-}));
+await page.getByRole('navigation').getByRole('button', { name: '案件工作台' }).click();
+await page.getByRole('heading', { name: /案件工作台/ }).waitFor();
+await page.locator('button.case-title').first().click();
+await page.getByRole('tab', { name: /AI 固证清单/ }).waitFor();
+await page.screenshot({ path: path.join(output, '03-case-evidence.png'), fullPage: true });
+await page.getByRole('tab', { name: '案情与责任研判' }).click();
+await page.screenshot({ path: path.join(output, '04-case-risk.png'), fullPage: true });
+await page.getByRole('tab', { name: '法律文书' }).click();
+await page.screenshot({ path: path.join(output, '05-case-documents.png'), fullPage: true });
+
+const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+await mobile.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' });
+await Promise.race([
+  mobile.getByRole('button', { name: '进入工作台' }).waitFor(),
+  mobile.getByRole('heading', { name: /案件工作台|我的案件工作台|法务工作台/ }).waitFor(),
+]);
+if (await mobile.getByRole('button', { name: '进入工作台' }).count()) await mobile.getByRole('button', { name: '进入工作台' }).click();
+await mobile.getByRole('heading', { name: /案件工作台|我的案件工作台|法务工作台/ }).waitFor();
+const mobileMetrics = await mobile.evaluate(() => ({ bodyWidth: document.body.scrollWidth, viewportWidth: innerWidth }));
+assert(mobileMetrics.bodyWidth <= mobileMetrics.viewportWidth + 1, 'mobile page has horizontal overflow');
+await mobile.screenshot({ path: path.join(output, '06-mobile.png'), fullPage: true });
 
 await browser.close();
-console.log(JSON.stringify({ desktopMetrics, mobileMetrics, consoleErrors }, null, 2));
+console.log(JSON.stringify({ workbenchMetrics, mobileMetrics, consoleErrors }, null, 2));
+if (consoleErrors.length) process.exitCode = 1;
