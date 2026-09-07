@@ -4,8 +4,7 @@ import { Add24Regular, Alert24Regular, ArrowExit20Regular, ArrowRight24Regular, 
 import { api, post, roleNames, dateText, timeLeft } from './api';
 import type { User, CaseItem, Task, AuditLog } from './api';
 import { CaseWorkspace } from './CaseWorkspace';
-import { KnowledgePage, Login } from './Pages';
-import { Intake } from './Intake';
+import { Intake, KnowledgePage, Login } from './Pages';
 
 export function RiskBadge({ risk }: { risk: string }) { return <span className={`risk risk-${risk === '高' ? 'high' : risk === '低' ? 'low' : 'medium'}`}><i />{risk}风险</span>; }
 export function Heading({ title, description, actions }: { title: string; description: string; actions?: React.ReactNode }) { return <div className="page-heading"><div><h1>{title}</h1><p>{description}</p></div>{actions && <div className="heading-actions">{actions}</div>}</div>; }
