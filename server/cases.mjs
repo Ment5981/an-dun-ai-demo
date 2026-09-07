@@ -1,5 +1,6 @@
 import { all, one, run, uid, now, audit, knowledgeRows } from './db.mjs';
 import { analyzeCase } from './ai.mjs';
+import { availableActions } from './workflow.mjs';
 
 export function caseScope(user, alias = 'c') {
   if (user.role === 'legal') return { sql: '1 = 1', args: [] };
@@ -51,6 +52,7 @@ export function caseDetail(id, user = null) {
   const timeline = all('SELECT a.*,u.name AS actor,u.role AS actorRole FROM AuditLog a LEFT JOIN User u ON u.id=a.userId WHERE a.caseId=? ORDER BY a.createdAt DESC,a.rowid DESC', id);
   return {
     ...item, evidence, tasks, analysis, documents, timeline,
+    allowedActions: availableActions(item, user),
     evidenceCount: evidence.length, requiredCount, completedCount,
     completeness: requiredCount ? Math.round(completedCount / requiredCount * 100) : 0,
     nextAction: item.status === '已归档' ? '案件已归档' : pending[0]?.title || analysis?.nextAction || '补充案情并进行辅助研判',
@@ -60,14 +62,30 @@ export function caseDetail(id, user = null) {
 export function listCases(user) {
   const scope = caseScope(user);
   return all(`SELECT c.id FROM "Case" c WHERE ${scope.sql} ORDER BY c.updatedAt DESC,c.createdAt DESC`, ...scope.args).map(({ id }) => {
-    const { evidence, tasks, analysis, documents, timeline, clarificationAnswers, ...summary } = caseDetail(id);
-    return summary;
+    const { evidence, tasks, analysis, documents, timeline, clarificationAnswers, ...summary } = caseDetail(id, user);
+    // The workbench needs a compact AI snapshot so the AI command panel can
+    // surface the next action without loading every case one by one. Full
+    // evidence, timeline and document payloads remain detail-only.
+    return {
+      ...summary,
+      analysis: analysis ? {
+        category: analysis.category, risk: analysis.risk, summary: analysis.summary,
+        focusPoints: analysis.focusPoints, riskReasons: analysis.riskReasons,
+        escalationReasons: analysis.escalationReasons, nextAction: analysis.nextAction,
+        citations: analysis.citations, mode: analysis.mode, model: analysis.model,
+        engine: analysis.engine, modeDetail: analysis.modeDetail,
+        retrievalCount: analysis.retrievalCount, evidenceGapCount: analysis.evidenceGapCount,
+        generatedAt: analysis.generatedAt, disclaimer: analysis.disclaimer,
+        fallbackReason: analysis.fallbackReason, aiTrace: analysis.aiTrace,
+      } : null,
+    };
   });
 }
 export async function getAnalysis(item, evidence = evidenceRows(item.id)) {
   // User-submitted experience cases enter the retrieval index only after legal
   // review. This keeps an unverified anecdote from becoming a legal citation.
-  return analyzeCase(item, evidence, knowledgeRows({ approvedOnly: true }));
+  const owner = one('SELECT * FROM User WHERE id=?', item.ownerId);
+  return analyzeCase(item, evidence, knowledgeRows({ approvedOnly: true, user: owner }).filter(k => k.visibility !== 'private' && k.reviewStatus === '已审核'));
 }
 export function addTask(item, { title, kind, evidenceKey = null, dueAt = null, priority = 'P1', assignedTo = item.ownerId }) {
   const id = uid('task_');

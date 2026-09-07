@@ -8,6 +8,8 @@ import { caseScope, caseRow, caseDetail, listCases, evidenceRows, getAnalysis, s
 import { retrieveKnowledge } from './ai.mjs';
 import { buildDocument } from './documents.mjs';
 import { seedDatabase } from './seed.mjs';
+import { availableActions } from './workflow.mjs';
+import { intakeDraft } from './intake.mjs';
 
 await seedDatabase();
 export const app = express();
@@ -114,6 +116,11 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.get('/api/cases', (req, res) => res.json({ cases: listCases(req.user) }));
+app.post('/api/intake/draft', asyncRoute(async (req,res) => {
+  const description=string(req.body.description,'案情描述',10000,true);
+  if(description.length<10) fail(400,'请至少描述10个字，说明发生了什么。');
+  res.json(await intakeDraft(description));
+}));
 app.post('/api/cases', asyncRoute(async (req, res) => {
   const amount = req.body.amount === undefined ? 0 : Number(req.body.amount);
   if (!Number.isFinite(amount) || amount < 0 || amount > 100000000 || typeof req.body.amount === 'boolean') fail(400, '争议金额须为 0 至 100000000 的有效数字');
@@ -248,6 +255,9 @@ function pendingTask(caseId, kind) {
 // actions keep the courier → supervisor → legal chain auditable while preserving
 // the original business stage (取证中/协商中/赔偿审批/法务处理中).
 async function handleHandoff(item, req, action, note) {
+  const roles = { handoff_supervisor: 'courier', accept_supervisor: 'supervisor', return_courier: 'supervisor', request_legal: 'supervisor', accept_legal: 'legal', return_supervisor: 'legal', legal_approve: 'legal' };
+  requireRoles(req, [roles[action]]);
+  if (!availableActions(item, req.user).includes(action)) fail(409, '当前交接阶段不支持此操作，请刷新案件后从可用操作继续。');
   const timestamp = now();
   const requireNote = () => { if (note.length < 4) fail(400, '请填写至少 4 个字的交接说明，便于后续复核。'); };
   if (action === 'handoff_supervisor') {
@@ -304,7 +314,7 @@ async function handleHandoff(item, req, action, note) {
     transaction(() => {
       completePendingTasks(item.id, 'legal_review', note);
       addTask(item, { title: `主管继续处置：${note}`, kind: 'supervisor_action', priority: 'P1', dueAt: new Date(Date.now() + 48 * 3600000).toISOString(), assignedTo: supervisor.id });
-      run('UPDATE "Case" SET status=?,legalReviewedAt=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', item.status === '法务处理中' ? '待补证' : item.status, timestamp, 'supervisor', supervisor.id, 'returned_to_supervisor', note, timestamp, timestamp, item.id);
+      run('UPDATE "Case" SET status=?,legalReviewedAt=NULL,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', '待补证', 'supervisor', supervisor.id, 'returned_to_supervisor', note, timestamp, timestamp, item.id);
       audit(req.user, '退回主管继续处置', `法务给出意见并退回主管：${note}`, item.id);
     });
   } else if (action === 'legal_approve') {
@@ -322,23 +332,25 @@ async function handleHandoff(item, req, action, note) {
 
 app.post('/api/cases/:id/transition', asyncRoute(async (req, res) => withCaseLock(req.params.id, async () => {
   const item = requireCase(req, req.params.id); writable(item);
-  const action = string(req.body.action, '操作', 30, true);
+  let action = string(req.body.action, '操作', 30, true);
+  if (action === 'escalate') action = 'request_legal';
   const note = string(req.body.note, '处理说明', 3000);
   const handoffActions = new Set(['handoff_supervisor', 'accept_supervisor', 'return_courier', 'request_legal', 'accept_legal', 'return_supervisor', 'legal_approve']);
   if (handoffActions.has(action)) {
     const result = await handleHandoff(item, req, action, note);
     return res.json({ case: result });
   }
-  const statuses = { supplement: '待补证', negotiate: '协商中', compensate: '赔偿审批', escalate: '法务处理中', archive: '已归档' };
+  const statuses = { supplement: '待补证', negotiate: '协商中', compensate: '赔偿审批', escalate: '法务处理中', archive: '已归档', resolve: '已归档' };
   if (!statuses[action]) fail(400, '不支持的案件操作');
   if (action === 'escalate') requireRoles(req, ['supervisor', 'legal']);
   if (['compensate', 'archive'].includes(action)) requireRoles(req, ['supervisor', 'legal']);
-  if (['compensate', 'escalate', 'archive'].includes(action) && note.length < 4) fail(400, '请填写至少 4 个字的处理说明，便于审计追溯');
+  if (!availableActions(item, req.user).includes(action)) fail(409, '案件当前由其他角色处理，或须先接收交接。请按当前阶段操作。');
+  if (['compensate', 'escalate', 'archive', 'resolve', 'negotiate'].includes(action) && note.length < 4) fail(400, '请填写至少 4 个字的处理说明，便于审计追溯');
   if (item.escalated && !item.legalReviewedAt && action !== 'escalate' && req.user.role !== 'legal') fail(403, '本案已升级法务，须经人工法务审核后才能变更处置阶段。');
   if (item.escalated && !item.legalReviewedAt && action !== 'escalate' && note.length < 4) fail(400, '请法务填写审核结论后变更处置阶段');
   if (action === 'compensate' && !['协商中', '法务处理中', '赔偿审批'].includes(item.status)) fail(409, '请先进入协商阶段，再发起赔偿审批');
   if (action === 'negotiate' && !one('SELECT id FROM Evidence WHERE caseId=? LIMIT 1', item.id)) fail(409, '请至少固定一项证据后再进入协商阶段');
-  if (action === 'archive') {
+  if (action === 'archive' || action === 'resolve') {
     if (!['协商中', '赔偿审批', '法务处理中'].includes(item.status)) fail(409, '请完成协商或法务处置后归档');
     const pending = one('SELECT COUNT(*) AS count FROM Task WHERE caseId=? AND status=?', item.id, '待处理').count;
     if (pending) fail(409, `仍有 ${pending} 项待办未完成，请完成固证、期限与人工审核任务后再归档。`);
@@ -368,7 +380,7 @@ app.post('/api/cases/:id/transition', asyncRoute(async (req, res) => withCaseLoc
 app.get('/api/tasks', (req, res) => {
   const scope = caseScope(req.user);
   const tasks = all(`SELECT t.*,c.title AS caseTitle,u.name AS assignedToName FROM Task t JOIN "Case" c ON c.id=t.caseId JOIN User u ON u.id=t.assignedTo WHERE ${scope.sql} ORDER BY CASE t.status WHEN '待处理' THEN 0 ELSE 1 END,t.dueAt IS NULL,t.dueAt`, ...scope.args);
-  res.json({ tasks });
+  res.json({ tasks: tasks.filter(task => task.assignedTo === req.user.id) });
 });
 app.patch('/api/tasks/:id', asyncRoute(async (req, res) => {
   const task = one('SELECT * FROM Task WHERE id=?', req.params.id);
@@ -378,6 +390,10 @@ app.patch('/api/tasks/:id', asyncRoute(async (req, res) => {
     const status = string(req.body.status, '待办状态', 10, true);
     const note = string(req.body.note, '完成说明', 3000);
     if (!['待处理', '已完成'].includes(status)) fail(400, '不支持的待办状态');
+    // Legal reviewers may mark their assigned review task complete from the
+    // task center after checking the case. The case transition still records
+    // the formal legal decision; supervisor handoff tasks remain action-only.
+    if (task.kind === 'supervisor_review') fail(409, '请打开案件，使用接收案件等操作完成主管交接。');
     if (task.kind === 'legal_review') requireRoles(req, ['legal']);
     if (['supervisor_review', 'supervisor_action'].includes(task.kind)) {
       requireRoles(req, ['supervisor']);
@@ -392,7 +408,10 @@ app.patch('/api/tasks/:id', asyncRoute(async (req, res) => {
     transaction(() => {
       run('UPDATE Task SET status=?,completedAt=?,completionNote=? WHERE id=?', status, status === '已完成' ? now() : null, note || null, task.id);
       run('UPDATE "Case" SET updatedAt=? WHERE id=?', now(), item.id);
-      if (task.kind === 'legal_review') run('UPDATE "Case" SET legalReviewedAt=? WHERE id=?', status === '已完成' ? now() : null, item.id);
+      if (task.kind === 'legal_review') {
+        run('UPDATE "Case" SET legalReviewedAt=? WHERE id=?', status === '已完成' ? now() : null, item.id);
+        if (status === '已完成') run('UPDATE "Case" SET currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=? WHERE id=?', 'legal', req.user.id, 'legal_handling', note || '法务已接收审核任务。', now(), item.id);
+      }
       audit(req.user, task.kind === 'legal_review' ? '人工法务审核' : '更新待办', `${task.title} → ${status}${note ? '；' + note : ''}`, item.id);
     });
     res.json({ task: one('SELECT t.*,c.title AS caseTitle FROM Task t JOIN "Case" c ON c.id=t.caseId WHERE t.id=?', task.id) });
@@ -424,7 +443,7 @@ app.get('/api/documents/:id/download', (req, res) => {
 app.get('/api/knowledge', (req, res) => {
   const q = string(req.query.q, '检索词', 500);
   const type = string(req.query.type, '知识类型', 80);
-  let items = knowledgeRows();
+  let items = knowledgeRows({ user: req.user });
   if (type && type !== '全部') items = items.filter(x => x.type === type);
   if (q) items = retrieveKnowledge(q, items, 30);
   res.json({ items });
@@ -441,12 +460,14 @@ app.post('/api/knowledge', (req, res) => {
     let url; try { url = new URL(item.sourceUrl); } catch { fail(400, '来源链接格式错误'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) fail(400, '来源须为不含账号凭据的 HTTP/HTTPS 链接');
   }
-  const reviewStatus = type === '历史案例' && req.user.role !== 'legal' ? '待法务审核' : '已审核';
+  const visibility = type === '历史案例' && req.body.visibility !== 'shared' ? 'private' : 'shared';
+  const reviewStatus = visibility === 'private' ? '仅本人' : type === '历史案例' ? '待审核' : '已审核';
   transaction(() => {
     run('INSERT INTO Knowledge (id,title,type,content,sourceUrl,version,createdBy,reviewStatus,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', item.id, item.title, item.type, item.content, item.sourceUrl, item.version, req.user.id, reviewStatus, item.createdAt);
+    run('UPDATE Knowledge SET visibility=?,org=? WHERE id=?', visibility, type === '历史案例' ? req.user.org : null, item.id);
     audit(req.user, type === '历史案例' && req.user.role !== 'legal' ? '提交经验案例' : '新增知识', `${item.title}；类型 ${item.type}；版本 ${item.version}；状态 ${reviewStatus}。${item.sourceUrl ? '已登记来源链接。' : '未提供外部来源，需结合案卷核验。'}`);
   });
-  res.status(201).json({ item: { ...item, keywords: [], isDemo: false, verifiedAt: reviewStatus === '已审核' ? item.createdAt : null, reviewStatus, createdBy: req.user.id, createdByName: req.user.name, createdByRole: req.user.role } });
+  res.status(201).json({ item: knowledgeRows({ user: req.user }).find(k => k.id === item.id) });
 });
 app.post('/api/knowledge/upload', knowledgeUpload.single('file'), asyncRoute(async (req, res) => {
   const type = string(req.body.type, '知识类型', 80, true);
@@ -461,40 +482,61 @@ app.post('/api/knowledge/upload', knowledgeUpload.single('file'), asyncRoute(asy
   if (['法律法规', '行业规则'].includes(type) && !sourceUrl) fail(400, '法律法规与行业规则必须提供可追溯的原始来源链接');
   if (sourceUrl) { let url; try { url = new URL(sourceUrl); } catch { fail(400, '来源链接格式错误'); } if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) fail(400, '来源须为不含账号凭据的 HTTP/HTTPS 链接'); }
   if (!content && ['text/plain', 'text/csv', 'text/markdown'].includes(mimeType)) content = req.file.buffer.toString('utf8').slice(0, 50000);
-  if (!content) content = `已上传原始附件：${req.file.originalname}。正文需在法务审核时结合原件核验。`;
-  const id = uid('know_'); const createdAt = now(); const reviewStatus = type === '历史案例' && req.user.role !== 'legal' ? '待法务审核' : '已审核';
+  if (content.trim().length < 10) fail(400, '请补充至少10字的经验摘要；TXT、Markdown、CSV可自动读取，其他附件请概述处理经过和结果。');
+  const id = uid('know_'); const createdAt = now();
+  const visibility = type === '历史案例' && req.body.visibility !== 'shared' ? 'private' : 'shared';
+  const reviewStatus = visibility === 'private' ? '仅本人' : type === '历史案例' ? '待审核' : '已审核';
   const storageName = `${id}${extension}`; const destination = join(knowledgeUploadsDir, storageName);
   writeFileSync(destination, req.file.buffer, { flag: 'wx' });
   try {
     transaction(() => {
       run('INSERT INTO Knowledge (id,title,type,content,sourceUrl,version,createdBy,reviewStatus,attachmentName,storageName,mimeType,size,sha256,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', id, title, type, content, sourceUrl, version, req.user.id, reviewStatus, req.file.originalname.slice(0, 240), storageName, mimeType, req.file.size, sha256(req.file.buffer), createdAt);
+      run('UPDATE Knowledge SET visibility=?,org=? WHERE id=?', visibility, type === '历史案例' ? req.user.org : null, id);
       audit(req.user, type === '历史案例' && req.user.role !== 'legal' ? '提交经验案例附件' : '新增知识附件', `${title}；原文件 ${req.file.originalname}；SHA-256 ${sha256(req.file.buffer)}；状态 ${reviewStatus}。`);
     });
   } catch (error) { try { unlinkSync(destination); } catch { /* preserve original failure */ } throw error; }
-  const item = knowledgeRows().find(row => row.id === id);
+  const item = knowledgeRows({ user: req.user }).find(row => row.id === id);
   res.status(201).json({ item });
 }));
 app.get('/api/knowledge/:id/download', (req, res) => {
   const item = one('SELECT * FROM Knowledge WHERE id=?', req.params.id);
   if (!item || !item.storageName || !/^[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(item.storageName)) fail(404, '知识附件不存在或无权访问');
+  if (!knowledgeRows({ user: req.user }).some(k => k.id === item.id)) fail(404, '知识附件不存在或无权访问');
   const filename = join(knowledgeUploadsDir, item.storageName);
   if (!existsSync(filename)) fail(404, '知识附件原文件缺失，请联系管理员核查');
   audit(req.user, '下载知识附件', `${item.title}；SHA-256 ${item.sha256 || '未记录'}`);
   res.set('Content-Type', item.mimeType || 'application/octet-stream'); res.download(filename, item.attachmentName || `${item.title}.bin`);
 });
 app.patch('/api/knowledge/:id/review', (req, res) => {
-  requireRoles(req, ['legal']);
+  requireRoles(req, ['legal', 'supervisor']);
   const item = one('SELECT * FROM Knowledge WHERE id=?', req.params.id);
   if (!item) fail(404, '知识条目不存在');
+  if (item.visibility === 'private') fail(409, '个人经验尚未申请共享，无需审核。');
+  if (req.user.role === 'supervisor' && (item.type !== '历史案例' || item.org !== req.user.org)) fail(403, '主管只能审核本网点的经验案例。');
+  if (item.createdBy === req.user.id) fail(403, '共享经验需由另一位授权审核人复核，不能自审。');
+  if (!['待审核','待法务审核'].includes(item.reviewStatus)) fail(409, '此条目不在待审核状态。');
   const status = string(req.body.status, '审核状态', 20, true);
   const note = string(req.body.note, '审核意见', 3000, true);
   if (!['已审核', '已退回'].includes(status)) fail(400, '审核状态只能是已审核或已退回');
   transaction(() => {
     run('UPDATE Knowledge SET reviewStatus=?,verifiedAt=? WHERE id=?', status, status === '已审核' ? now() : null, item.id);
+    run('UPDATE Knowledge SET reviewNote=? WHERE id=?', note, item.id);
     audit(req.user, status === '已审核' ? '审核通过经验案例' : '退回经验案例', `${item.title}；审核意见：${note}`, null);
   });
-  const updated = knowledgeRows().find(row => row.id === item.id);
+  const updated = knowledgeRows({ user: req.user }).find(row => row.id === item.id);
   res.json({ item: updated });
+});
+app.post('/api/knowledge/:id/share', (req, res) => {
+  const item = one('SELECT * FROM Knowledge WHERE id=? AND createdBy=?', req.params.id, req.user.id);
+  if (!item || item.type !== '历史案例') fail(404, '经验案例不存在或无权操作');
+  if (!['仅本人', '已退回'].includes(item.reviewStatus)) fail(409, '已提交共享，无需重复提交');
+  const updatedContent = req.body.content === undefined ? item.content : string(req.body.content, '经验正文', 50000, true);
+  if (updatedContent.length < 10) fail(400, '请先补充可检索的经验正文');
+  transaction(() => {
+    run('UPDATE Knowledge SET content=?,visibility=?,reviewStatus=?,reviewNote=? WHERE id=?', updatedContent, 'shared', '待审核', '', item.id);
+    audit(req.user, '申请共享经验', `${item.title}；提交本网点共享审核，审核通过后参与案件检索。`);
+  });
+  res.json({ item: knowledgeRows({ user: req.user }).find(k => k.id === item.id) });
 });
 app.get('/api/audit', (req, res) => {
   requireRoles(req, ['supervisor', 'legal']);

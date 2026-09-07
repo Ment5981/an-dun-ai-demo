@@ -4,13 +4,23 @@ export type Role = 'courier' | 'supervisor' | 'legal';
 export type User = { id: string; username?: string; name: string; role: Role; org: string };
 export type Evidence = { id: string; title: string; category: string; originalName: string; mimeType: string; size: number; sha256: string; createdAt: string; uploadedBy: string; status: string };
 export type Task = { id: string; caseId: string; caseTitle: string; title: string; kind: string; status: string; dueAt: string; priority: string; assignedTo: string; createdAt: string };
-export type Knowledge = { id: string; title: string; type: string; content: string; sourceUrl: string; version: string; isDemo?: boolean; verifiedAt?: string; score?: number; reviewStatus?: string; createdByName?: string; attachmentName?: string };
+export type Knowledge = { id: string; title: string; type: string; content: string; sourceUrl: string; version: string; isDemo?: boolean; verifiedAt?: string; score?: number; reviewStatus?: string; createdByName?: string; createdBy?: string; attachmentName?: string; visibility?: string; org?: string; reviewNote?: string };
 export type Citation = { id: string; title: string; sourceUrl: string; version: string; excerpt: string };
+export type AiTraceStage = { id: string; title: string; status: string; output: string; explanation: string; sourceIds?: string[]; reasons?: string[]; missingCategories?: string[]; urgentCategories?: string[]; escalationReasons?: string[] };
+export type AiTrace = {
+  pipeline?: string; version?: string; generatedAt?: string; status?: string; mode?: 'rules' | 'llm'; model?: string | null;
+  runtime?: { providerConfigured?: boolean; provider?: string; model?: string | null; fallback?: boolean; status?: string; latencyMs?: number };
+  stages?: AiTraceStage[]; sources?: Array<{ rank: number; id: string; title: string; type?: string; version?: string | null; sourceUrl?: string | null; score?: number | null; matchTerms?: string[] }>;
+  evidence?: { requiredCategories?: string[]; availableCategories?: string[]; missingCategories?: string[]; uploadedCount?: number };
+  humanReviewRequired?: boolean; humanReviewReasons?: string[]; guardrails?: string[];
+};
 export type Analysis = {
   category: string; risk: string; summary: string; focusPoints: string[]; riskReasons?: string[];
   questions: { id: string; question: string }[];
   checklist: { id: string; title: string; category: string; priority: 'immediate' | 'supplement' | 'available'; reason: string; deadlineHours?: number }[];
   sop: { title: string; description: string }[]; citations: Citation[]; escalationReasons: string[];
+  nextAction?: string; evidenceReview?: string; engine?: string; model?: string | null; aiTrace?: AiTrace;
+  modeDetail?: string; retrievalCount?: number; evidenceGapCount?: number; triggerReasons?: string[];
   mode: 'rules' | 'llm'; generatedAt: string; disclaimer: string; fallbackReason?: string;
 };
 export type LegalDocument = { id: string; type: string; title: string; content: string; createdAt: string; status: string };
@@ -21,7 +31,7 @@ export type CaseItem = {
   evidenceCount: number; requiredCount: number; completeness: number; nextAction: string; dueAt: string; escalated: boolean;
   description: string; goods: string; insured: boolean; incidentAt: string; monitorDeadline?: string;
   insuranceDeadline?: string; proofDeadline?: string; major: boolean; criminalRisk: boolean;
-  currentHandlerRole?: Role; currentHandlerId?: string; currentHandlerName?: string | null; handoffStatus?: string; handoffNote?: string | null; handoffAt?: string | null;
+  currentHandlerRole?: Role; currentHandlerId?: string; currentHandlerName?: string | null; handoffStatus?: string; handoffNote?: string | null; handoffAt?: string | null; allowedActions?: string[]; completedCount?: number; legalReviewedAt?: string;
   clarificationAnswers?: Record<string, string>; evidence: Evidence[]; tasks: Task[]; documents: LegalDocument[];
   timeline: AuditLog[]; analysis: Analysis;
 };

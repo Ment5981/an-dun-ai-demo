@@ -8,7 +8,17 @@ const demoUsers: Record<string, User> = {
 };
 
 const staticAnalysis: Analysis = {
-  category: '破损', risk: '高', mode: 'rules', generatedAt: stamp(-1),
+  category: '破损', risk: '高', mode: 'rules', engine: 'local-rules-rag', model: null, retrievalCount: 2, evidenceGapCount: 5, generatedAt: stamp(-1),
+  aiTrace: { pipeline: 'sf-dispute-ai', version: '2026.09-ai-core', generatedAt: stamp(-1), status: 'completed', mode: 'rules', model: null, runtime: { providerConfigured: false, provider: 'local-rules', fallback: true, status: 'rules_only' }, stages: [
+    { id: 'classify', title: '案件分类', status: 'completed', output: '破损', explanation: '根据案情描述识别包装受损争议。' },
+    { id: 'retrieve', title: 'RAG 知识检索', status: 'completed', output: '2 条可追溯来源', explanation: '仅使用知识库中实际命中的来源片段。' },
+    { id: 'evidence', title: '证据缺口识别', status: 'completed', output: '2/7 类已具备', explanation: '按破损争议映射立即固定与待补证材料。', missingCategories: ['tracking', 'packaging', 'monitor', 'value', 'delivery'], urgentCategories: ['tracking', 'packaging', 'monitor'] },
+    { id: 'risk', title: '责任风险辅助研判', status: 'completed', output: '高风险优先级', explanation: '金额阈值与证据缺口触发人工复核。', reasons: ['主张金额达到演示升级阈值 ¥10,000'] },
+    { id: 'action', title: '处置建议生成', status: 'completed', output: '固定易失证据并申请人工法务复核', explanation: 'SOP 只整理事实、清单和来源。' },
+  ], sources: [
+    { rank: 1, id: 'law-civil-832', title: '《中华人民共和国民法典》第八百三十二条', type: '法律法规', version: '2020-05-28通过，2021-01-01施行', sourceUrl: 'https://gdca.miit.gov.cn/zwgk/zcwj/flfg/art/2020/art_573d6ef5018b46b6a4e1f31ca085a710.html', score: 9.4 },
+    { rank: 2, id: 'law-express-28', title: '《快递暂行条例》第二十八条', type: '法律法规', version: '2025-06-01施行版本', sourceUrl: 'https://www.mee.gov.cn/zcwj/gwywj/202504/t20250422_1117316.shtml', score: 8.7 },
+  ], evidence: { requiredCategories: ['waybill', 'tracking', 'chat', 'value', 'packaging', 'monitor', 'delivery'], availableCategories: ['waybill', 'chat'], missingCategories: ['tracking', 'value', 'packaging', 'monitor', 'delivery'], uploadedCount: 2 }, humanReviewRequired: true, humanReviewReasons: ['主张金额达到演示升级阈值 ¥10,000', '仍有证据类别待补齐'], guardrails: ['模型只能从服务端候选项选择，不能创建法条、案号或新事实。'] },
   summary: '当前信息显示存在包装受损、货损发现时间和责任环节未闭合三个争议焦点。先保存原始状态和运输交接记录，再由法务核验赔偿口径。',
   focusPoints: ['货物和外包装在签收、开箱时的原始状态尚未完整固定。', '分拨、派送交接时间与监控原片需要和物流轨迹相互印证。', '金额属于演示升级阈值以上，不能由 AI 直接作出赔偿结论。'],
   riskReasons: ['主张金额达到演示升级阈值 ¥10,000，需人工法务复核。'],

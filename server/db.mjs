@@ -33,8 +33,11 @@ ensureColumn('Knowledge', 'storageName', 'TEXT');
 ensureColumn('Knowledge', 'mimeType', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('Knowledge', 'size', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('Knowledge', 'sha256', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('Knowledge', 'visibility', "TEXT NOT NULL DEFAULT 'shared'");
+ensureColumn('Knowledge', 'org', 'TEXT');
+ensureColumn('Knowledge', 'reviewNote', "TEXT NOT NULL DEFAULT ''");
 db.exec('UPDATE "Case" SET currentHandlerId=ownerId WHERE currentHandlerId IS NULL');
-db.exec("UPDATE \"Case\" SET currentHandlerRole=(SELECT role FROM User WHERE User.id=\"Case\".ownerId) WHERE currentHandlerRole='courier'");
+db.exec("UPDATE \"Case\" SET currentHandlerRole=(SELECT role FROM User WHERE User.id=\"Case\".ownerId) WHERE currentHandlerRole='courier' AND handoffStatus='self_handling'");
 db.exec("UPDATE Knowledge SET reviewStatus='已审核' WHERE reviewStatus IS NULL OR reviewStatus=''");
 db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_review ON Knowledge(reviewStatus,createdAt)');
 export const uid = (prefix = '') => `${prefix}${randomUUID()}`;
@@ -65,11 +68,21 @@ export function audit(user, action, detail, caseId = null) {
   run('INSERT INTO AuditLog (id,caseId,userId,action,detail,org,createdAt) VALUES (?,?,?,?,?,?,?)',
     uid('log_'), caseId, user?.id || null, action, detail, user?.org || null, now());
 }
-export function knowledgeRows({ approvedOnly = false } = {}) {
+export function knowledgeRows({ approvedOnly = false, user = null } = {}) {
   const sql = approvedOnly
     ? "SELECT k.*,u.name AS createdByName,u.role AS createdByRole FROM Knowledge k LEFT JOIN User u ON u.id=k.createdBy WHERE k.reviewStatus='已审核' ORDER BY k.createdAt DESC"
     : 'SELECT k.*,u.name AS createdByName,u.role AS createdByRole FROM Knowledge k LEFT JOIN User u ON u.id=k.createdBy ORDER BY k.createdAt DESC';
-  return all(sql).map(row => ({
-    ...row, keywords: JSON.parse(row.keywords), isDemo: Boolean(row.isDemo),
-  }));
+  let rows = all(sql);
+  if (user) {
+    // Private experience is visible and retrievable only by its creator.
+    // Pending sharing requests are visible to the creator and scoped reviewers.
+    rows = all('SELECT k.*,u.name AS createdByName,u.role AS createdByRole FROM Knowledge k LEFT JOIN User u ON u.id=k.createdBy ORDER BY k.createdAt DESC').filter(k => {
+      if (k.createdBy === user.id) return approvedOnly ? k.reviewStatus !== '已退回' : true;
+      if (k.visibility === 'private') return false;
+      if (k.org && k.org !== user.org && user.role !== 'legal') return false;
+      if (k.reviewStatus === '已审核') return true;
+      return !approvedOnly && (user.role === 'legal' || user.role === 'supervisor' && k.type === '历史案例' && k.org === user.org);
+    });
+  }
+  return rows.map(({ storageName, ...row }) => ({ ...row, keywords: JSON.parse(row.keywords), isDemo: Boolean(row.isDemo) }));
 }

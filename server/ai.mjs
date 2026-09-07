@@ -1,6 +1,7 @@
 import { knowledgeSeeds } from './knowledge-seed.mjs';
 
-const MAX_AMOUNT_FOR_STANDARD_FLOW = 10_000;
+const configuredThreshold = Number(process.env.LEGAL_AMOUNT_THRESHOLD || 50_000);
+const MAX_AMOUNT_FOR_STANDARD_FLOW = Number.isFinite(configuredThreshold) && configuredThreshold > 0 ? configuredThreshold : 50_000;
 const CATEGORIES = ['破损', '丢失', '错发', '签收争议', '赔偿纠纷', '延误', '其他'];
 const DISCLAIMER = '仅为责任风险辅助研判，风险等级表示处置优先级，不是责任比例、赔偿决定或胜诉预测。上传成功仅表示文件已保存，证据真实性及法律结论须由人工法务审核。';
 const ngrams = (value) => {
@@ -311,14 +312,14 @@ export async function analyzeCase(caseData = {}, evidence = [], knowledgeItems =
   }).sort((a, b) => ['immediate', 'supplement', 'available'].indexOf(a.priority) - ['immediate', 'supplement', 'available'].indexOf(b.priority));
   const amount = Math.max(0, Number(caseData.amount) || 0);
   const escalationReasons = [];
-  if (amount >= MAX_AMOUNT_FOR_STANDARD_FLOW) escalationReasons.push('主张金额达到演示升级阈值 ¥10,000，需人工法务复核');
+  if (amount >= MAX_AMOUNT_FOR_STANDARD_FLOW) escalationReasons.push(`主张金额达到演示升级阈值 ¥${MAX_AMOUNT_FOR_STANDARD_FLOW.toLocaleString('en-US')}，需人工法务复核`);
   if (flag(caseData.major)) escalationReasons.push('案件已标记为重大事件，需人工法务复核');
   if (flag(caseData.criminalRisk)) escalationReasons.push('案件已标记存在刑事风险线索，需人工法务与相关负责人核实');
   // Recognize reported criminal clues, without turning a negated statement into a finding.
   if (!flag(caseData.criminalRisk) && /(?:涉嫌|疑似|怀疑|发现)(?:[^。；\n]{0,12})(?:盗窃|诈骗|抢劫|侵占|毒品|犯罪)/.test(text)) escalationReasons.push('案情包含待核实的刑事风险线索，需人工法务复核；不代表已认定犯罪');
   const missing = checklist.filter((item) => item.priority !== 'available');
   const urgent = checklist.filter((item) => item.priority === 'immediate');
-  const risk = escalationReasons.length ? '高' : missing.length || category === '其他' ? '中' : '低';
+  const risk = escalationReasons.length || amount >= 10000 ? '高' : missing.length || category === '其他' ? '中' : '低';
   const riskReasons = [...escalationReasons];
   if (missing.length) riskReasons.push(`仍有 ${missing.length} 类取证材料待补齐${urgent.length ? `，其中 ${urgent.length} 类应立即固定` : ''}`);
   if (category === '其他') riskReasons.push('争议类型和关键事实尚需澄清');
