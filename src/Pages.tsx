@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Checkbox, Input, Spinner, Textarea } from '@fluentui/react-components';
 import { Add24Regular, ArrowRight24Regular, ArrowUpload24Regular, BookOpen24Regular, Box24Regular, CheckmarkCircle24Regular, DocumentText24Regular, LockClosed24Regular, PeopleTeam24Regular, Person24Regular, Scales24Regular, Search24Regular, ShieldTask24Regular } from '@fluentui/react-icons';
 import { api, post, roleNames } from './api';
-import type { CaseItem, Knowledge, Role, User } from './api';
+import type { AgentDraft, CaseItem, Knowledge, Role, User } from './api';
 import { Brand, Empty, Heading } from './App';
 
 const Scale24Regular = Scales24Regular;
@@ -15,10 +15,11 @@ export function Login({ onLogin, serverError }: { onLogin: (u: User) => void; se
 }
 
 const localTime=(date:Date)=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
-export function Intake({ onCreated, notify }: { onCreated: (id:string)=>Promise<void>; notify:(m:string,e?:boolean)=>void }) {
+export function Intake({ onCreated, notify, prefill }: { onCreated: (id:string)=>Promise<void>; notify:(m:string,e?:boolean)=>void; prefill?: AgentDraft|null }) {
   const [title,setTitle]=useState('');const [waybill,setWaybill]=useState('');const [goods,setGoods]=useState('');const [amount,setAmount]=useState('');const [description,setDescription]=useState('');
   const [incidentAt,setIncidentAt]=useState(localTime(new Date()));const [monitorDeadline,setMonitorDeadline]=useState('');const [insuranceDeadline,setInsuranceDeadline]=useState('');const [proofDeadline,setProofDeadline]=useState('');
   const [insured,setInsured]=useState(false);const [major,setMajor]=useState(false);const [criminalRisk,setCriminal]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  useEffect(()=>{if(!prefill)return;setTitle(prefill.title||'');setGoods(prefill.goods||'');setAmount(prefill.amount==null?'':String(prefill.amount));setDescription(prefill.description||'');},[prefill]);
   const demo=()=>{setTitle('相机运输破损争议');setWaybill(`SF${Date.now()}`);setGoods('相机及镜头');setAmount('12800');setDescription('客户反馈相机签收后发现镜头破损，外箱一角挤压变形，要求赔偿 12800 元。寄件时包装情况需核验，客户暂未提供购买凭证。分拨中心监控预计 6 小时后覆盖，需立即调取。');setMonitorDeadline(localTime(new Date(Date.now()+6*3600000)));setInsured(false);};
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');try{const data=await post<{case:CaseItem}>('/cases',{title,waybill,goods,amount:Number(amount),description,insured,major,criminalRisk,incidentAt:new Date(incidentAt).toISOString(),...(monitorDeadline?{monitorDeadline:new Date(monitorDeadline).toISOString()}:{}),...(insuranceDeadline?{insuranceDeadline:new Date(insuranceDeadline).toISOString()}:{}),...(proofDeadline?{proofDeadline:new Date(proofDeadline).toISOString()}:{})});notify('案件已建立，固证清单和处置任务已生成');await onCreated(data.case.id);}catch(err){setError((err as Error).message);}finally{setBusy(false);}};
   return <><Heading title="新建纠纷案件" description="先记录已知事实。暂不确定的信息，可在澄清环节继续补充。" actions={<Button onClick={demo} icon={<DocumentText24Regular/>}>填入演示案情</Button>}/><div className="intake-layout"><form className="panel intake-form" onSubmit={submit}><div className="form-section"><div className="section-title"><span>01</span><h2>运单与基本信息</h2></div><div className="form-grid"><label className="field span-2"><span>案件名称 <b>*</b></span><Input required maxLength={100} value={title} onChange={(_,d)=>setTitle(d.value)} placeholder="例如：深圳相机运输破损争议"/></label><label className="field"><span>运单号 <b>*</b></span><Input required maxLength={40} value={waybill} onChange={(_,d)=>setWaybill(d.value)} placeholder="SF 开头的运单号"/></label><label className="field"><span>货物名称 <b>*</b></span><Input required maxLength={100} value={goods} onChange={(_,d)=>setGoods(d.value)} placeholder="例如：相机及镜头"/></label><label className="field"><span>争议金额（元）<b>*</b></span><Input required type="number" min={0} max={100000000} step="0.01" value={amount} onChange={(_,d)=>setAmount(d.value)} placeholder="客户主张金额，不代表确认损失"/></label><label className="field"><span>事发时间 <b>*</b></span><input required type="datetime-local" value={incidentAt} onChange={e=>setIncidentAt(e.target.value)}/></label></div><Checkbox label="已购买保价服务（仍需核验条款及凭证）" checked={insured} onChange={(_,d)=>setInsured(d.checked===true)}/></div>

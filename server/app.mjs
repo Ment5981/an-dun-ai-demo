@@ -10,6 +10,7 @@ import { buildDocument } from './documents.mjs';
 import { seedDatabase } from './seed.mjs';
 import { availableActions } from './workflow.mjs';
 import { intakeDraft } from './intake.mjs';
+import { agentReply } from './agent.mjs';
 
 await seedDatabase();
 export const app = express();
@@ -120,6 +121,11 @@ app.post('/api/intake/draft', asyncRoute(async (req,res) => {
   const description=string(req.body.description,'案情描述',10000,true);
   if(description.length<10) fail(400,'请至少描述10个字，说明发生了什么。');
   res.json(await intakeDraft(description));
+}));
+app.post('/api/agent/chat', asyncRoute(async (req, res) => {
+  if (!Array.isArray(req.body.messages) || req.body.messages.length > 24) fail(400, '对话消息格式错误');
+  const messages = req.body.messages.map(message => ({ role: message?.role, content: string(message?.content, '消息', 3000, true) }));
+  res.json(await agentReply(messages, req.user));
 }));
 app.post('/api/cases', asyncRoute(async (req, res) => {
   const amount = req.body.amount === undefined ? 0 : Number(req.body.amount);

@@ -6,6 +6,8 @@ export type Evidence = { id: string; title: string; category: string; originalNa
 export type Task = { id: string; caseId: string; caseTitle: string; title: string; kind: string; status: string; dueAt: string; priority: string; assignedTo: string; createdAt: string };
 export type Knowledge = { id: string; title: string; type: string; content: string; sourceUrl: string; version: string; isDemo?: boolean; verifiedAt?: string; score?: number; reviewStatus?: string; createdByName?: string; createdBy?: string; attachmentName?: string; visibility?: string; org?: string; reviewNote?: string };
 export type Citation = { id: string; title: string; sourceUrl: string; version: string; excerpt: string };
+export type AgentDraft = { title: string; goods: string; amount: number | null; category: string; description: string };
+export type AgentMessage = { role: 'user' | 'assistant'; content: string };
 export type AiTraceStage = { id: string; title: string; status: string; output: string; explanation: string; sourceIds?: string[]; reasons?: string[]; missingCategories?: string[]; urgentCategories?: string[]; escalationReasons?: string[] };
 export type AiTrace = {
   pipeline?: string; version?: string; generatedAt?: string; status?: string; mode?: 'rules' | 'llm'; model?: string | null;
