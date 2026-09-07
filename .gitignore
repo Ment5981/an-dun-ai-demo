@@ -2,6 +2,9 @@ node_modules/
 dist/
 tmp/
 data/
+.env
+.env.*
+!.env.example
 *.local
 *.tsbuildinfo
 vite.config.js

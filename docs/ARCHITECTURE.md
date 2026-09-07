@@ -26,7 +26,7 @@ Node.js API 服务器
 | 页面 | 主要内容 | 角色差异 |
 | --- | --- | --- |
 | 登录 | 演示账号、身份选择、密码校验 | 身份需与账号所属角色匹配 |
-| 工作台 | 立即处理、即将到期、案件统计、我的案件 | 快递员看本人案件；主管看辖区；法务看全部 |
+| 工作台 | 立即处理、即将到期、案件统计、我的案件 | 快递员看本人案件并转交主管；主管看辖区并请求法务；法务看全量接收与复核队列 |
 | 新建案件 | 运单、损失金额、发现时间、案情、紧急期限 | 创建后自动分类并生成澄清问题和固证任务 |
 | 案件详情 | 案情与运单、状态、责任风险、下一步行动 | 按身份显示可执行操作 |
 | 固证清单 | 立即固定 / 待补充 / 已具备、附件上传、摘要 | 文件与相应证据要求关联 |
@@ -34,7 +34,7 @@ Node.js API 服务器
 | 时间线 | 报案、分析、证据、任务、流转、文书、归档 | 只显示已授权案件的事件 |
 | 行动中心 | 监控覆盖、保险报案、补证、人工确认期限 | 法定举证截止日期需要人工核对 |
 | 文书 | 情况说明、证据目录、监控调取函、答辩材料 | 所有输出为可审阅草稿 |
-| 知识库 | 法律、行业规则、内部 SOP、历史案例、模板 | 法务维护；已登录用户检索 |
+| 知识库 | 法律、行业规则、内部 SOP、历史案例、模板 | 已登录用户可提交自己的历史案例附件；法务审核后才进入 AI 检索 |
 | 操作日志 | 操作人、动作、对象、时间 | 主管看辖区、法务看全部；快递员通过本人案件时间线追溯 |
 
 ## 3. 数据库 Schema
@@ -46,13 +46,13 @@ Node.js API 服务器
 | Role | id、name | courier / supervisor / legal |
 | User | id、username、passwordHash、role、name、org、createdAt | 用户、scrypt 密码哈希与组织范围 |
 | Session | tokenHash、userId、expiresAt | 服务端认证会话与退出失效 |
-| Case | id、title、description、category、status、risk、amount、goods、insured、major、criminalRisk、escalated、ownerId、org、incidentAt、monitorDeadline、insuranceDeadline、proofDeadline、clarificationAnswers、legalReviewedAt、isDemo、createdAt、updatedAt | 案件主记录、人工审核锁与流程状态 |
+| Case | id、title、description、category、status、risk、amount、goods、insured、major、criminalRisk、escalated、ownerId、org、incidentAt、monitorDeadline、insuranceDeadline、proofDeadline、clarificationAnswers、legalReviewedAt、currentHandlerRole、currentHandlerId、handoffStatus、handoffNote、handoffAt、isDemo、createdAt、updatedAt | 案件主记录、人工审核锁、当前处理角色与交接状态 |
 | Waybill | id、caseId、number、goods、insured、createdAt | 运单号、物品与保价声明；caseId 唯一关联案件 |
 | Evidence | id、caseId、title、category、status、storageName、originalName、mimeType、size、sha256、uploadedBy、createdAt | 实际附件；清单中未上传的要求保存在分析和关联任务中 |
 | AIAnalysis | id、caseId、result、mode、createdBy、createdAt | result 为结构化 JSON，留存每次研判结果及引用 |
 | Task | id、caseId、title、kind、evidenceKey、priority、dueAt、status、assignedTo、createdAt、completedAt、completionNote | 固证、补证、人工确认与期限提醒 |
 | LegalDocument | id、caseId、type、title、content、status、createdBy、createdAt | 可审阅和下载的文书草稿 |
-| Knowledge | id、title、type、content、sourceUrl、version、keywords、isDemo、verifiedAt、createdBy、createdAt | 检索来源、版本线索与演示标识 |
+| Knowledge | id、title、type、content、sourceUrl、version、keywords、isDemo、verifiedAt、createdBy、reviewStatus、attachmentName、storageName、mimeType、size、sha256、createdAt | 检索来源、版本、用户投稿审核状态与私有原文件 |
 | AuditLog | id、userId、caseId、action、detail、org、createdAt | 可追溯的操作审计与案件时间线 |
 
 数据库启用外键约束、WAL 日志和 5 秒忙等待；按案件所有人、组织、任务状态与到期时间、分析时间、审计案件建立索引。建表源码见 [`server/schema.sql`](../server/schema.sql)。
@@ -66,9 +66,12 @@ Node.js API 服务器
 | 查看案件 | 本人创建 | 本辖区 | 全部 |
 | 创建、澄清、分析、上传证据 | 授权案件 | 授权案件 | 全部 |
 | 下载证据和文书 | 授权案件 | 授权案件 | 全部 |
-| 发起补证、协商、转法务 | 授权案件 | 授权案件 | 全部 |
+| 发起补证、协商、转交主管 | 本人案件 | — | — |
+| 接收主管交接、退回快递员、请求法务 | — | 本辖区案件 | — |
+| 接收法务、退回主管、审核完成 | — | — | 全部 |
 | 赔偿审批与归档 | 不可执行 | 普通辖区案件 | 全部；重大案件人工审核 |
-| 维护知识库 | 不可执行 | 不可执行 | 可执行 |
+| 提交历史经验案例 | 可提交，待法务审核 | 可提交，待法务审核 | 可提交并可审核 |
+| 维护法律法规、行业规则、内部 SOP、模板 | 不可执行 | 不可执行 | 可执行 |
 | 查看日志 | 本人案件时间线 | 本辖区审计与时间线 | 全部 |
 
 前端隐藏按钮仅改善交互；每个 API 必须独立校验登录、角色与对象归属。服务器从会话读取角色、人员与组织，不能相信客户端提交的 role / ownerId / org。会话 Cookie 为 `sf_session`，设置 HttpOnly 与 SameSite=Lax，服务端只保存令牌的 SHA-256，12 小时过期。浏览器写操作校验 Origin，允许来源通过 `ALLOWED_ORIGINS` 配置。
@@ -81,7 +84,7 @@ Node.js API 服务器
 4. 引用必须可映射回真实知识条目；无检索依据时明确提示缺少依据，不生成法条、案号或胜诉率。
 5. 知识中的内部 SOP、演示历史案例、模板与正式法律分别标注。法院通知载明的期限由人员确认，系统不凭案情推算法定举证截止日期。
 
-无需外部模型密钥即可演示完整业务链路；本地规则与检索输出应在页面明确标明。外部模型模式若启用，仅作为辅助生成能力，不能绕过角色授权、数据持久化、引用验证或重大案件升级规则。MVP 中未配置专门 OCR、语音转写和视频理解，上传文件不能被描述为已自动理解全部内容。
+无需外部模型密钥即可演示完整业务链路；本地规则与检索输出应在页面明确标明。外部模型模式通过 `.env` 中的 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL` 接入 OpenAI-compatible 服务（本项目已支持阿里云百炼兼容地址）；在需要代理的 Node 24+ 环境由启动脚本启用环境代理。外部模型仅作为辅助生成能力，不能绕过角色授权、数据持久化、引用验证或重大案件升级规则。MVP 中未配置专门 OCR、语音转写和视频理解，上传文件不能被描述为已自动理解全部内容。
 
 ## 6. API 设计原则
 
@@ -105,10 +108,13 @@ Node.js API 服务器
 | `POST /api/cases/:id/documents` | `{ type }` → `{ case }` | 已授权案件；答辩材料仅法务可生成 |
 | `GET /api/documents/:id/download` | 文书文本下载 | 再次校验关联案件范围；答辩材料仅法务可见 |
 | `GET /api/knowledge?q=&type=` | `{ items }`，含来源信息 | 已登录 |
-| `POST /api/knowledge` | `{ title, type, content, sourceUrl, version }` → `{ item }` | 仅法务 |
+| `POST /api/knowledge` | `{ title, type, content, sourceUrl, version }` → `{ item }` | 历史案例允许三类角色提交；其他类型仅法务 |
+| `POST /api/knowledge/upload` | multipart：`file`、`title`、`type`、`content?`、`sourceUrl?`、`version?` → `{ item }` | 历史案例附件可由业务角色提交；原文件私有保存 |
+| `PATCH /api/knowledge/:id/review` | `{ status: "已审核" | "已退回", note }` → `{ item }` | 仅法务；只有已审核经验案例进入 AI 检索 |
+| `GET /api/knowledge/:id/download` | 原始经验案例附件下载 | 已登录，按随机存储名受控访问 |
 | `GET /api/audit` | `{ logs }` | 仅主管与法务；主管限本组织事件 |
 
-`action` 取值：`supplement / negotiate / compensate / escalate / archive`。文书 `type` 取值：`情况说明 / 证据目录 / 监控调取函 / 答辩材料`。知识 `type` 取值：`法律法规 / 行业规则 / 内部SOP / 历史案例 / 文书模板`。证据 `category` 取值：`waybill / packaging / monitor / chat / value / delivery / tracking / identity`。
+`action` 取值：`supplement / negotiate / compensate / escalate / archive`，以及角色交接 `handoff_supervisor / accept_supervisor / return_courier / request_legal / accept_legal / return_supervisor / legal_approve`。文书 `type` 取值：`情况说明 / 证据目录 / 监控调取函 / 答辩材料`。知识 `type` 取值：`法律法规 / 行业规则 / 内部SOP / 历史案例 / 文书模板`。证据 `category` 取值：`waybill / packaging / monitor / chat / value / delivery / tracking / identity`。
 
 未登录返回 `401`，角色不足返回 `403`；无访问权限的案件、证据和文书返回 `404`，避免暴露对象是否存在。字段错误和状态冲突由服务器返回 `{ error, code? }`。自动化验收脚本直接调用真实 API，不使用 mock 代替数据库、授权或文件持久化验证。
 

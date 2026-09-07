@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS "Case" (
   ownerId TEXT NOT NULL REFERENCES User(id), org TEXT NOT NULL, incidentAt TEXT NOT NULL,
   monitorDeadline TEXT, insuranceDeadline TEXT, proofDeadline TEXT,
   clarificationAnswers TEXT NOT NULL DEFAULT '{}', legalReviewedAt TEXT,
+  currentHandlerRole TEXT NOT NULL DEFAULT 'courier', currentHandlerId TEXT REFERENCES User(id),
+  handoffStatus TEXT NOT NULL DEFAULT 'self_handling', handoffNote TEXT, handoffAt TEXT,
   isDemo INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS Waybill (
@@ -59,7 +61,8 @@ CREATE TABLE IF NOT EXISTS Knowledge (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL,
   sourceUrl TEXT NOT NULL DEFAULT '', version TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
   isDemo INTEGER NOT NULL DEFAULT 0, verifiedAt TEXT, createdBy TEXT REFERENCES User(id),
-  createdAt TEXT NOT NULL
+  reviewStatus TEXT NOT NULL DEFAULT '已审核', attachmentName TEXT NOT NULL DEFAULT '', storageName TEXT,
+  mimeType TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, sha256 TEXT NOT NULL DEFAULT '', createdAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS AuditLog (
   id TEXT PRIMARY KEY, caseId TEXT REFERENCES "Case"(id), userId TEXT REFERENCES User(id),

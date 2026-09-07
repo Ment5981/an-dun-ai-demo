@@ -4,7 +4,7 @@ export type Role = 'courier' | 'supervisor' | 'legal';
 export type User = { id: string; username?: string; name: string; role: Role; org: string };
 export type Evidence = { id: string; title: string; category: string; originalName: string; mimeType: string; size: number; sha256: string; createdAt: string; uploadedBy: string; status: string };
 export type Task = { id: string; caseId: string; caseTitle: string; title: string; kind: string; status: string; dueAt: string; priority: string; assignedTo: string; createdAt: string };
-export type Knowledge = { id: string; title: string; type: string; content: string; sourceUrl: string; version: string; isDemo?: boolean; verifiedAt?: string; score?: number };
+export type Knowledge = { id: string; title: string; type: string; content: string; sourceUrl: string; version: string; isDemo?: boolean; verifiedAt?: string; score?: number; reviewStatus?: string; createdByName?: string; attachmentName?: string };
 export type Citation = { id: string; title: string; sourceUrl: string; version: string; excerpt: string };
 export type Analysis = {
   category: string; risk: string; summary: string; focusPoints: string[]; riskReasons?: string[];
@@ -21,6 +21,7 @@ export type CaseItem = {
   evidenceCount: number; requiredCount: number; completeness: number; nextAction: string; dueAt: string; escalated: boolean;
   description: string; goods: string; insured: boolean; incidentAt: string; monitorDeadline?: string;
   insuranceDeadline?: string; proofDeadline?: string; major: boolean; criminalRisk: boolean;
+  currentHandlerRole?: Role; currentHandlerId?: string; currentHandlerName?: string | null; handoffStatus?: string; handoffNote?: string | null; handoffAt?: string | null;
   clarificationAnswers?: Record<string, string>; evidence: Evidence[]; tasks: Task[]; documents: LegalDocument[];
   timeline: AuditLog[]; analysis: Analysis;
 };

@@ -9,7 +9,7 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "start": "node server/index.mjs",
+    "start": "node scripts/start.mjs",
     "test:api": "node scripts/api-smoke.mjs",
     "test:visual": "node scripts/visual-qa.mjs"
   },

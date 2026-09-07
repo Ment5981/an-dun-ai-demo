@@ -3,7 +3,7 @@ import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import { all, one, run, uid, now, transaction, checkPassword, publicUser, sha256, uploadsDir, projectDir, audit, knowledgeRows } from './db.mjs';
+import { all, one, run, uid, now, transaction, checkPassword, publicUser, sha256, uploadsDir, knowledgeUploadsDir, projectDir, audit, knowledgeRows } from './db.mjs';
 import { caseScope, caseRow, caseDetail, listCases, evidenceRows, getAnalysis, saveAnalysis, addTask } from './cases.mjs';
 import { retrieveKnowledge } from './ai.mjs';
 import { buildDocument } from './documents.mjs';
@@ -125,6 +125,7 @@ app.post('/api/cases', asyncRoute(async (req, res) => {
     goods: string(req.body.goods, '物品名称', 200), amount,
     insured: bool(req.body.insured, '是否保价'), major: bool(req.body.major, '重大案件标记'), criminalRisk: bool(req.body.criminalRisk, '刑事风险标记'),
     ownerId: req.user.id, org: req.user.org, status: '取证中', escalated: false, clarificationAnswers: {},
+    currentHandlerRole: req.user.role, currentHandlerId: req.user.id, handoffStatus: 'self_handling', handoffNote: null, handoffAt: null,
     incidentAt: dateInput(req.body.incidentAt, '事发时间', timestamp),
     monitorDeadline: dateInput(req.body.monitorDeadline, '监控覆盖时间'),
     insuranceDeadline: dateInput(req.body.insuranceDeadline, '保险报案期限'),
@@ -133,8 +134,8 @@ app.post('/api/cases', asyncRoute(async (req, res) => {
   if (Date.parse(item.incidentAt) > Date.now() + 300000) fail(400, '事发时间不能在未来');
   const analysis = await getAnalysis(item, []);
   transaction(() => {
-    run('INSERT INTO "Case" (id,title,description,amount,goods,insured,major,criminalRisk,ownerId,org,incidentAt,monitorDeadline,insuranceDeadline,proofDeadline,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      item.id, item.title, item.description, item.amount, item.goods, +item.insured, +item.major, +item.criminalRisk, item.ownerId, item.org, item.incidentAt, item.monitorDeadline, item.insuranceDeadline, item.proofDeadline, timestamp, timestamp);
+    run('INSERT INTO "Case" (id,title,description,amount,goods,insured,major,criminalRisk,ownerId,org,incidentAt,monitorDeadline,insuranceDeadline,proofDeadline,currentHandlerRole,currentHandlerId,handoffStatus,handoffNote,handoffAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      item.id, item.title, item.description, item.amount, item.goods, +item.insured, +item.major, +item.criminalRisk, item.ownerId, item.org, item.incidentAt, item.monitorDeadline, item.insuranceDeadline, item.proofDeadline, item.currentHandlerRole, item.currentHandlerId, item.handoffStatus, item.handoffNote, item.handoffAt, timestamp, timestamp);
     run('INSERT INTO Waybill (id,caseId,number,goods,insured,createdAt) VALUES (?,?,?,?,?,?)', uid('wb_'), item.id, item.waybill, item.goods, +item.insured, timestamp);
     audit(req.user, '新建案件', `${item.title}；运单 ${item.waybill}；争议金额 ¥${amount.toFixed(2)}。`, item.id);
     saveAnalysis(item, analysis, req.user);
@@ -160,8 +161,9 @@ app.post('/api/cases/:id/analysis', asyncRoute(async (req, res) => withCaseLock(
 })));
 
 const evidenceCategories = new Set(['waybill', 'packaging', 'monitor', 'chat', 'value', 'delivery', 'tracking', 'identity', 'insurance', 'other']);
-const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.mp4', '.mov', '.webm', '.txt', '.csv', '.docx']);
+const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.mp4', '.mov', '.webm', '.txt', '.md', '.csv', '.docx']);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024, files: 1, fields: 5, fieldSize: 2000 } });
+const knowledgeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 10, fieldSize: 50000 } });
 function validateFile(file) {
   if (!file || !file.size) fail(400, '请选择非空证据文件');
   const extension = extname(file.originalname).toLowerCase();
@@ -180,10 +182,11 @@ function validateFile(file) {
     '.webm': () => sig.subarray(0, 4).equals(Buffer.from([26,69,223,163])),
     '.docx': () => sig[0] === 80 && sig[1] === 75,
     '.txt': () => !b.subarray(0, 8192).includes(0),
+    '.md': () => !b.subarray(0, 8192).includes(0),
     '.csv': () => !b.subarray(0, 8192).includes(0),
   };
   if (!signatures[extension]()) fail(400, '文件内容与扩展名不匹配，请上传原始文件');
-  const mimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.txt': 'text/plain', '.csv': 'text/csv', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+  const mimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
   return { extension, mimeType: mimeTypes[extension] };
 }
 app.post('/api/cases/:id/evidence', (req, res, next) => { try { writable(requireCase(req, req.params.id)); next(); } catch (e) { next(e); } }, upload.single('file'), asyncRoute(async (req, res) => withCaseLock(req.params.id, async () => {
@@ -230,12 +233,105 @@ app.get('/api/evidence/:id/verify', (req, res) => {
   res.json({ id: item.id, sha256: item.sha256, actualSha256, valid, verifiedAt: now() });
 });
 
+function findHandler(role, org = null) {
+  if (role === 'legal') return one('SELECT * FROM User WHERE role=? ORDER BY id LIMIT 1', role);
+  return one('SELECT * FROM User WHERE role=? AND org=? ORDER BY id LIMIT 1', role, org);
+}
+function completePendingTasks(caseId, kind, note) {
+  run('UPDATE Task SET status=?,completedAt=?,completionNote=? WHERE caseId=? AND kind=? AND status=?', '已完成', now(), note || null, caseId, kind, '待处理');
+}
+function pendingTask(caseId, kind) {
+  return one('SELECT id FROM Task WHERE caseId=? AND kind=? AND status=? LIMIT 1', caseId, kind, '待处理');
+}
+
+// Cases normally stay with the person who opened them. These explicit handoff
+// actions keep the courier → supervisor → legal chain auditable while preserving
+// the original business stage (取证中/协商中/赔偿审批/法务处理中).
+async function handleHandoff(item, req, action, note) {
+  const timestamp = now();
+  const requireNote = () => { if (note.length < 4) fail(400, '请填写至少 4 个字的交接说明，便于后续复核。'); };
+  if (action === 'handoff_supervisor') {
+    requireRoles(req, ['courier']); requireNote();
+    if (item.currentHandlerRole && !['courier'].includes(item.currentHandlerRole) && item.handoffStatus !== 'returned_to_courier') fail(409, '本案当前不在快递员处理环节。');
+    const supervisor = findHandler('supervisor', item.org);
+    if (!supervisor) fail(409, '当前网点暂无可接收的主管账号。');
+    transaction(() => {
+      completePendingTasks(item.id, 'supervisor_review', note);
+      addTask(item, { title: `主管复核：${note}`, kind: 'supervisor_review', priority: item.risk === '高' ? 'P0' : 'P1', dueAt: new Date(Date.now() + 24 * 3600000).toISOString(), assignedTo: supervisor.id });
+      run('UPDATE "Case" SET currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', 'supervisor', supervisor.id, 'awaiting_supervisor', note, timestamp, timestamp, item.id);
+      audit(req.user, '转交主管', `快递员申请主管复核：${note}`, item.id);
+    });
+  } else if (action === 'accept_supervisor') {
+    requireRoles(req, ['supervisor']);
+    transaction(() => {
+      completePendingTasks(item.id, 'supervisor_review', note || '主管已接收案件并开始复核。');
+      run('UPDATE "Case" SET currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', 'supervisor', req.user.id, 'supervisor_handling', note || '主管已接收案件并开始复核。', timestamp, timestamp, item.id);
+      audit(req.user, '主管接收案件', note || '主管已接收案件并开始复核。', item.id);
+    });
+  } else if (action === 'return_courier') {
+    requireRoles(req, ['supervisor']); requireNote();
+    const courier = one('SELECT * FROM User WHERE id=? AND role=?', item.ownerId, 'courier');
+    if (!courier) fail(409, '原经办快递员账号不存在，无法退回。');
+    transaction(() => {
+      completePendingTasks(item.id, 'supervisor_review', note);
+      addTask(item, { title: `快递员补充：${note}`, kind: 'courier_action', priority: 'P1', dueAt: new Date(Date.now() + 24 * 3600000).toISOString(), assignedTo: courier.id });
+      run('UPDATE "Case" SET status=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', '待补证', 'courier', courier.id, 'returned_to_courier', note, timestamp, timestamp, item.id);
+      audit(req.user, '退回快递员补证', `主管退回原经办补充：${note}`, item.id);
+    });
+  } else if (action === 'request_legal') {
+    requireRoles(req, ['supervisor']); requireNote();
+    const legal = findHandler('legal');
+    if (!legal) fail(409, '当前系统暂无可接收的法务账号。');
+    transaction(() => {
+      completePendingTasks(item.id, 'supervisor_review', note);
+      run('UPDATE "Case" SET escalated=1,status=?,legalReviewedAt=NULL,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', '法务处理中', 'legal', legal.id, 'awaiting_legal', note, timestamp, timestamp, item.id);
+      if (!pendingTask(item.id, 'legal_review')) addTask(item, { title: `法务接收：${note}`, kind: 'legal_review', priority: 'P0', dueAt: new Date(Date.now() + 4 * 3600000).toISOString(), assignedTo: legal.id });
+      audit(req.user, '申请法务接收', `主管申请法务介入：${note}`, item.id);
+    });
+  } else if (action === 'accept_legal') {
+    requireRoles(req, ['legal']);
+    transaction(() => {
+      const task = one('SELECT id FROM Task WHERE caseId=? AND kind=? AND status=? LIMIT 1', item.id, 'legal_review', '待处理');
+      if (task) run('UPDATE Task SET assignedTo=? WHERE id=?', req.user.id, task.id);
+      else addTask(item, { title: '人工法务审核', kind: 'legal_review', priority: 'P0', dueAt: new Date(Date.now() + 4 * 3600000).toISOString(), assignedTo: req.user.id });
+      run('UPDATE "Case" SET status=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', '法务处理中', 'legal', req.user.id, 'legal_handling', note || '法务已接收案件并开始审核。', timestamp, timestamp, item.id);
+      audit(req.user, '法务接收案件', note || '法务已接收案件并开始审核。', item.id);
+    });
+  } else if (action === 'return_supervisor') {
+    requireRoles(req, ['legal']); requireNote();
+    const supervisor = findHandler('supervisor', item.org);
+    if (!supervisor) fail(409, '原网点暂无可接收的主管账号，无法退回。');
+    transaction(() => {
+      completePendingTasks(item.id, 'legal_review', note);
+      addTask(item, { title: `主管继续处置：${note}`, kind: 'supervisor_action', priority: 'P1', dueAt: new Date(Date.now() + 48 * 3600000).toISOString(), assignedTo: supervisor.id });
+      run('UPDATE "Case" SET status=?,legalReviewedAt=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', item.status === '法务处理中' ? '待补证' : item.status, timestamp, 'supervisor', supervisor.id, 'returned_to_supervisor', note, timestamp, timestamp, item.id);
+      audit(req.user, '退回主管继续处置', `法务给出意见并退回主管：${note}`, item.id);
+    });
+  } else if (action === 'legal_approve') {
+    requireRoles(req, ['legal']); requireNote();
+    const supervisor = findHandler('supervisor', item.org);
+    transaction(() => {
+      completePendingTasks(item.id, 'legal_review', note);
+      if (supervisor) addTask(item, { title: '法务审核完成，请推进协商或赔偿审批', kind: 'supervisor_action', priority: 'P1', dueAt: new Date(Date.now() + 48 * 3600000).toISOString(), assignedTo: supervisor.id });
+      run('UPDATE "Case" SET status=?,legalReviewedAt=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', '协商中', timestamp, supervisor ? 'supervisor' : 'legal', supervisor?.id || req.user.id, 'legal_resolved', note, timestamp, timestamp, item.id);
+      audit(req.user, '法务审核完成', `法务给出处置意见：${note}`, item.id);
+    });
+  }
+  return caseDetail(item.id, req.user);
+}
+
 app.post('/api/cases/:id/transition', asyncRoute(async (req, res) => withCaseLock(req.params.id, async () => {
   const item = requireCase(req, req.params.id); writable(item);
   const action = string(req.body.action, '操作', 30, true);
   const note = string(req.body.note, '处理说明', 3000);
+  const handoffActions = new Set(['handoff_supervisor', 'accept_supervisor', 'return_courier', 'request_legal', 'accept_legal', 'return_supervisor', 'legal_approve']);
+  if (handoffActions.has(action)) {
+    const result = await handleHandoff(item, req, action, note);
+    return res.json({ case: result });
+  }
   const statuses = { supplement: '待补证', negotiate: '协商中', compensate: '赔偿审批', escalate: '法务处理中', archive: '已归档' };
   if (!statuses[action]) fail(400, '不支持的案件操作');
+  if (action === 'escalate') requireRoles(req, ['supervisor', 'legal']);
   if (['compensate', 'archive'].includes(action)) requireRoles(req, ['supervisor', 'legal']);
   if (['compensate', 'escalate', 'archive'].includes(action) && note.length < 4) fail(400, '请填写至少 4 个字的处理说明，便于审计追溯');
   if (item.escalated && !item.legalReviewedAt && action !== 'escalate' && req.user.role !== 'legal') fail(403, '本案已升级法务，须经人工法务审核后才能变更处置阶段。');
@@ -249,9 +345,10 @@ app.post('/api/cases/:id/transition', asyncRoute(async (req, res) => withCaseLoc
   }
   transaction(() => {
     if (action === 'escalate') {
-      run('UPDATE "Case" SET escalated=1,status=?,updatedAt=? WHERE id=?', statuses[action], now(), item.id);
+      const legal = one('SELECT id FROM User WHERE role=? ORDER BY id LIMIT 1', 'legal');
+      run('UPDATE "Case" SET escalated=1,status=?,currentHandlerRole=?,currentHandlerId=?,handoffStatus=?,handoffNote=?,handoffAt=?,updatedAt=? WHERE id=?', statuses[action], 'legal', legal?.id || null, 'awaiting_legal', note || '案件已申请人工法务审核。', now(), now(), item.id);
       if (!one('SELECT id FROM Task WHERE caseId=? AND kind=? AND status=?', item.id, 'legal_review', '待处理')) {
-        const legal = one('SELECT id FROM User WHERE role=? ORDER BY id LIMIT 1', 'legal');
+        if (!legal) fail(409, '当前系统暂无可接收的法务账号。');
         addTask(item, { title: '人工法务审核：' + note, kind: 'legal_review', priority: 'P0', dueAt: new Date(Date.now() + 4 * 3600000).toISOString(), assignedTo: legal.id });
         run('UPDATE "Case" SET legalReviewedAt=NULL WHERE id=?', item.id);
       }
@@ -282,6 +379,14 @@ app.patch('/api/tasks/:id', asyncRoute(async (req, res) => {
     const note = string(req.body.note, '完成说明', 3000);
     if (!['待处理', '已完成'].includes(status)) fail(400, '不支持的待办状态');
     if (task.kind === 'legal_review') requireRoles(req, ['legal']);
+    if (['supervisor_review', 'supervisor_action'].includes(task.kind)) {
+      requireRoles(req, ['supervisor']);
+      if (task.assignedTo !== req.user.id) fail(403, '该主管待办已分配给其他主管。');
+    }
+    if (task.kind === 'courier_action') {
+      requireRoles(req, ['courier']);
+      if (task.assignedTo !== req.user.id) fail(403, '该待办已分配给原经办快递员。');
+    }
     if (status === '已完成' && (task.kind === 'evidence' || task.evidenceKey === 'monitor') && !one('SELECT id FROM Evidence WHERE caseId=? AND category=? LIMIT 1', item.id, task.evidenceKey)) fail(409, '该待办关联固证清单，请先上传对应证据');
     if (status === '已完成' && task.kind === 'legal_review' && note.length < 4) fail(400, '请填写至少 4 个字的法务审核意见');
     transaction(() => {
@@ -325,19 +430,71 @@ app.get('/api/knowledge', (req, res) => {
   res.json({ items });
 });
 app.post('/api/knowledge', (req, res) => {
-  requireRoles(req, ['legal']);
-  const item = { id: uid('know_'), title: string(req.body.title, '知识标题', 240, true), type: string(req.body.type, '知识类型', 80, true), content: string(req.body.content, '知识正文', 50000, true), sourceUrl: string(req.body.sourceUrl, '来源链接', 2000), version: string(req.body.version, '版本信息', 160, true), createdAt: now() };
+  const type = string(req.body.type, '知识类型', 80, true);
+  // 业务角色可提交自己的经验案例；法规、行业规则、SOP 和模板仍由法务维护。
+  if (type !== '历史案例') requireRoles(req, ['legal']);
+  const item = { id: uid('know_'), title: string(req.body.title, '知识标题', 240, true), type, content: string(req.body.content, '知识正文', 50000, true), sourceUrl: string(req.body.sourceUrl, '来源链接', 2000), version: string(req.body.version, '版本信息', 160) || (type === '历史案例' ? '用户投稿' : ''), createdAt: now() };
   if (!['法律法规', '行业规则', '内部SOP', '历史案例', '文书模板'].includes(item.type)) fail(400, '请选择有效知识类型');
+  if (!item.version) fail(400, '请填写版本信息');
   if (['法律法规', '行业规则'].includes(item.type) && !item.sourceUrl) fail(400, '法律法规与行业规则必须提供可追溯的原始来源链接');
   if (item.sourceUrl) {
     let url; try { url = new URL(item.sourceUrl); } catch { fail(400, '来源链接格式错误'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) fail(400, '来源须为不含账号凭据的 HTTP/HTTPS 链接');
   }
+  const reviewStatus = type === '历史案例' && req.user.role !== 'legal' ? '待法务审核' : '已审核';
   transaction(() => {
-    run('INSERT INTO Knowledge (id,title,type,content,sourceUrl,version,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?)', item.id, item.title, item.type, item.content, item.sourceUrl, item.version, req.user.id, item.createdAt);
-    audit(req.user, '新增知识', `${item.title}；类型 ${item.type}；版本 ${item.version}。来源链接由录入法务负责核验。`);
+    run('INSERT INTO Knowledge (id,title,type,content,sourceUrl,version,createdBy,reviewStatus,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', item.id, item.title, item.type, item.content, item.sourceUrl, item.version, req.user.id, reviewStatus, item.createdAt);
+    audit(req.user, type === '历史案例' && req.user.role !== 'legal' ? '提交经验案例' : '新增知识', `${item.title}；类型 ${item.type}；版本 ${item.version}；状态 ${reviewStatus}。${item.sourceUrl ? '已登记来源链接。' : '未提供外部来源，需结合案卷核验。'}`);
   });
-  res.status(201).json({ item: { ...item, keywords: [], isDemo: false, verifiedAt: null } });
+  res.status(201).json({ item: { ...item, keywords: [], isDemo: false, verifiedAt: reviewStatus === '已审核' ? item.createdAt : null, reviewStatus, createdBy: req.user.id, createdByName: req.user.name, createdByRole: req.user.role } });
+});
+app.post('/api/knowledge/upload', knowledgeUpload.single('file'), asyncRoute(async (req, res) => {
+  const type = string(req.body.type, '知识类型', 80, true);
+  if (type !== '历史案例') requireRoles(req, ['legal']);
+  if (!req.file || !req.file.size) fail(400, '请选择经验案例原文件');
+  const { extension, mimeType } = validateFile(req.file);
+  const title = string(req.body.title, '知识标题', 240, true);
+  let content = string(req.body.content, '知识正文', 50000);
+  const sourceUrl = string(req.body.sourceUrl, '来源链接', 2000);
+  const version = string(req.body.version, '版本信息', 160) || (type === '历史案例' ? '用户投稿' : '待核验版本');
+  if (!['法律法规', '行业规则', '内部SOP', '历史案例', '文书模板'].includes(type)) fail(400, '请选择有效知识类型');
+  if (['法律法规', '行业规则'].includes(type) && !sourceUrl) fail(400, '法律法规与行业规则必须提供可追溯的原始来源链接');
+  if (sourceUrl) { let url; try { url = new URL(sourceUrl); } catch { fail(400, '来源链接格式错误'); } if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) fail(400, '来源须为不含账号凭据的 HTTP/HTTPS 链接'); }
+  if (!content && ['text/plain', 'text/csv', 'text/markdown'].includes(mimeType)) content = req.file.buffer.toString('utf8').slice(0, 50000);
+  if (!content) content = `已上传原始附件：${req.file.originalname}。正文需在法务审核时结合原件核验。`;
+  const id = uid('know_'); const createdAt = now(); const reviewStatus = type === '历史案例' && req.user.role !== 'legal' ? '待法务审核' : '已审核';
+  const storageName = `${id}${extension}`; const destination = join(knowledgeUploadsDir, storageName);
+  writeFileSync(destination, req.file.buffer, { flag: 'wx' });
+  try {
+    transaction(() => {
+      run('INSERT INTO Knowledge (id,title,type,content,sourceUrl,version,createdBy,reviewStatus,attachmentName,storageName,mimeType,size,sha256,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', id, title, type, content, sourceUrl, version, req.user.id, reviewStatus, req.file.originalname.slice(0, 240), storageName, mimeType, req.file.size, sha256(req.file.buffer), createdAt);
+      audit(req.user, type === '历史案例' && req.user.role !== 'legal' ? '提交经验案例附件' : '新增知识附件', `${title}；原文件 ${req.file.originalname}；SHA-256 ${sha256(req.file.buffer)}；状态 ${reviewStatus}。`);
+    });
+  } catch (error) { try { unlinkSync(destination); } catch { /* preserve original failure */ } throw error; }
+  const item = knowledgeRows().find(row => row.id === id);
+  res.status(201).json({ item });
+}));
+app.get('/api/knowledge/:id/download', (req, res) => {
+  const item = one('SELECT * FROM Knowledge WHERE id=?', req.params.id);
+  if (!item || !item.storageName || !/^[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(item.storageName)) fail(404, '知识附件不存在或无权访问');
+  const filename = join(knowledgeUploadsDir, item.storageName);
+  if (!existsSync(filename)) fail(404, '知识附件原文件缺失，请联系管理员核查');
+  audit(req.user, '下载知识附件', `${item.title}；SHA-256 ${item.sha256 || '未记录'}`);
+  res.set('Content-Type', item.mimeType || 'application/octet-stream'); res.download(filename, item.attachmentName || `${item.title}.bin`);
+});
+app.patch('/api/knowledge/:id/review', (req, res) => {
+  requireRoles(req, ['legal']);
+  const item = one('SELECT * FROM Knowledge WHERE id=?', req.params.id);
+  if (!item) fail(404, '知识条目不存在');
+  const status = string(req.body.status, '审核状态', 20, true);
+  const note = string(req.body.note, '审核意见', 3000, true);
+  if (!['已审核', '已退回'].includes(status)) fail(400, '审核状态只能是已审核或已退回');
+  transaction(() => {
+    run('UPDATE Knowledge SET reviewStatus=?,verifiedAt=? WHERE id=?', status, status === '已审核' ? now() : null, item.id);
+    audit(req.user, status === '已审核' ? '审核通过经验案例' : '退回经验案例', `${item.title}；审核意见：${note}`, null);
+  });
+  const updated = knowledgeRows().find(row => row.id === item.id);
+  res.json({ item: updated });
 });
 app.get('/api/audit', (req, res) => {
   requireRoles(req, ['supervisor', 'legal']);

@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 
+const nodeProxyFlag = Number(process.versions.node.split('.')[0]) >= 24 ? ['--use-env-proxy'] : [];
 const children = [
-  spawn(process.execPath, ['server/index.mjs'], { stdio: 'inherit', env: { ...process.env, HOST: '127.0.0.1', PORT: process.env.API_PORT || '3001' } }),
+  spawn(process.execPath, [...nodeProxyFlag, 'server/index.mjs'], { stdio: 'inherit', env: { ...process.env, HOST: '127.0.0.1', PORT: process.env.API_PORT || '3001' } }),
   spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '0.0.0.0'], { stdio: 'inherit', env: { ...process.env, VITE_API_PORT: process.env.API_PORT || '3001' } }),
 ];
 let closing = false;

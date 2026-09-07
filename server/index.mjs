@@ -1,5 +1,8 @@
-import { app } from './app.mjs';
-import { db, dataDir } from './db.mjs';
+import { loadLocalEnv } from './env.mjs';
+
+loadLocalEnv();
+const { app } = await import('./app.mjs');
+const { db, dataDir } = await import('./db.mjs');
 
 const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || '127.0.0.1';

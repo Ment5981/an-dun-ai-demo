@@ -3089,3 +3089,64 @@ body { overflow: hidden; }
   .login-page > footer { flex-direction: column; gap: 5px; }
   .toast { right: 12px; bottom: 12px; left: 12px; min-width: 0; }
 }
+
+/* Role workbenches and high-legibility pass */
+.main-content { font-size: 14px; }
+.page-heading h1 { font-size: clamp(30px, 3vw, 38px); letter-spacing: -.04em; }
+.page-heading p { max-width: 760px; font-size: 14px; line-height: 1.65; }
+.panel-heading h2 { font-size: 17px; }
+.panel-heading p, .case-table th, .case-table td, .next-action, .todo-panel .mini-task strong, .todo-panel .mini-task small { font-size: 13px; }
+.case-table th { color: #aab4bf; }
+.case-table td small, .metric small, .table-footer, .principle-panel small { font-size: 12px; }
+.role-strip { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 16px; margin: -4px 0 20px; padding: 18px 20px; border: 1px solid #3b424c; border-radius: 14px; background: linear-gradient(110deg, rgba(215,25,63,.12), rgba(21,27,34,.82) 55%); }
+.role-strip.role-supervisor { background: linear-gradient(110deg, rgba(240,179,90,.1), rgba(21,27,34,.82) 55%); }
+.role-strip.role-legal { background: linear-gradient(110deg, rgba(110,167,239,.11), rgba(21,27,34,.82) 55%); }
+.role-strip-icon { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid rgba(239,70,101,.45); border-radius: 13px; color: #ff8798; background: rgba(215,25,63,.14); }
+.role-supervisor .role-strip-icon { border-color: rgba(240,179,90,.45); color: #f2c77f; background: rgba(240,179,90,.1); }
+.role-legal .role-strip-icon { border-color: rgba(110,167,239,.45); color: #91b9ef; background: rgba(110,167,239,.1); }
+.role-strip-icon svg { width: 23px; }
+.role-strip > div:nth-child(2) { min-width: 0; }
+.role-kicker { display: block; margin-bottom: 4px; color: #f08091; font-size: 12px; font-weight: 700; letter-spacing: .05em; }
+.role-supervisor .role-kicker { color: #e3b96e; }
+.role-legal .role-kicker { color: #86afe5; }
+.role-strip strong { display: block; color: #eef1f4; font-size: 17px; }
+.role-strip p { margin: 5px 0 0; color: #a9b3be; font-size: 13px; line-height: 1.6; }
+.role-route { display: flex; align-items: center; gap: 7px; padding: 10px 13px; border: 1px solid #39414b; border-radius: 10px; color: #8d9aa7; background: rgba(7,10,14,.28); white-space: nowrap; }
+.role-route span { margin-right: 3px; color: #6f7b88; font-size: 11px; }
+.role-route b { color: #d4dbe2; font-size: 12px; font-weight: 650; }
+.role-route svg { width: 14px; color: #697682; }
+.handoff-banner { display: flex; align-items: center; gap: 12px; margin: 16px 0 18px; padding: 12px 15px; border: 1px solid #3b424c; border-radius: 11px; background: #151a20; }
+.handoff-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #66cf9b; box-shadow: 0 0 0 5px rgba(102,207,155,.1); }
+.handoff-awaiting_supervisor .handoff-dot, .handoff-awaiting_legal .handoff-dot { background: #f0b35a; box-shadow: 0 0 0 5px rgba(240,179,90,.1); }
+.handoff-legal_handling .handoff-dot { background: #7daef0; box-shadow: 0 0 0 5px rgba(125,174,240,.1); }
+.handoff-banner > div:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.handoff-banner strong { color: #e5e9ed; font-size: 13px; }
+.handoff-banner > div:nth-child(2) span { overflow: hidden; color: #8995a1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-chain { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.handoff-chain b { padding: 5px 8px; border-radius: 6px; color: #737f8b; background: #20262d; font-size: 11px; font-weight: 600; }
+.handoff-chain b.on { color: #fff; background: rgba(215,25,63,.7); }
+.handoff-chain svg { width: 13px; color: #66737f; }
+.knowledge-role-note { display: flex; align-items: flex-start; gap: 12px; margin: -4px 0 16px; padding: 14px 16px; border: 1px solid #35404b; border-radius: 11px; color: #a9b5c1; background: rgba(110,167,239,.06); }
+.knowledge-role-note > svg { width: 20px; flex: 0 0 auto; color: #8bb5ec; }
+.knowledge-role-note div { display: flex; flex-direction: column; gap: 4px; }
+.knowledge-role-note strong { color: #e4e9ee; font-size: 14px; }
+.knowledge-role-note span { color: #84909c; font-size: 12px; line-height: 1.5; }
+.review-badge { padding: 3px 7px; border: 1px solid rgba(240,179,90,.35); border-radius: 999px; color: #f0c67c; background: rgba(240,179,90,.1); font-size: 10px; }
+.knowledge-file-input { position: relative; display: flex; align-items: center; gap: 9px; min-height: 46px; margin-top: 12px; padding: 0 13px; border: 1px dashed #4a5663; border-radius: 9px; color: #a8b3bf; background: #11151a; cursor: pointer; }
+.knowledge-file-input:hover { border-color: #ef7186; background: rgba(215,25,63,.06); }
+.knowledge-file-input svg { width: 19px; color: #ef7186; }
+.knowledge-file-input span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-file-input input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.knowledge-review-actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding-top: 11px; border-top: 1px solid #2b333c; }
+.knowledge-review-actions span { margin-right: auto; color: #d9b46d; font-size: 11px; }
+.knowledge-review-actions button { min-height: 30px; font-size: 11px; }
+.knowledge-attachment { display: flex; align-items: center; gap: 12px; margin: 14px 0; padding: 10px 12px; border: 1px solid #303a45; border-radius: 8px; color: #aab5c0; background: #12171c; font-size: 12px; }
+.knowledge-attachment a { margin-left: auto; color: #ef8493; text-decoration: none; }
+.action-buttons button, .heading-actions button { min-height: 38px; font-size: 13px; }
+
+@media (max-width: 720px) {
+  .role-strip { grid-template-columns: auto minmax(0,1fr); }
+  .role-route { grid-column: 1/-1; justify-content: center; }
+  .handoff-banner { align-items: flex-start; flex-wrap: wrap; }
+  .handoff-chain { width: 100%; margin-left: 21px; }
+}
