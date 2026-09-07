@@ -3091,6 +3091,18 @@ body { overflow: hidden; }
 }
 
 .agent-chat-panel { margin: 18px 0; padding: 20px; border: 1px solid #3c5066; border-radius: 16px; background: linear-gradient(135deg, rgba(23,39,57,.98), rgba(20,27,36,.98)); box-shadow: 0 14px 28px rgba(0,0,0,.12); }
+.agent-page { max-width: 980px; margin: 0 auto; }
+.agent-page-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:18px; }
+.agent-page-kicker { display:flex; align-items:center; gap:6px; color:#6eb2e7; font-size:12px; font-weight:700; letter-spacing:.04em; }
+.agent-page-heading h1 { margin:9px 0 5px; color:#f5f8fb; font-size:32px; letter-spacing:-.03em; }
+.agent-page-heading p { margin:0; color:#9eafbf; font-size:14px; line-height:1.6; }
+.agent-page-tip { display:flex; align-items:center; gap:9px; padding:11px 13px; border:1px solid #30465b; border-radius:10px; color:#a9cae4; background:#172838; font-size:13px; line-height:1.45; }
+.agent-page-tip svg { color:#7fc4f7; }
+.agent-page-tip small { color:#7890a4; font-size:11px; }
+.agent-page .agent-chat-panel { min-height:610px; margin:0; }
+.agent-page .agent-chat-messages { min-height:290px; max-height:430px; }
+.agent-page-foot { display:flex; justify-content:space-between; gap:15px; margin-top:11px; color:#8195a7; font-size:11px; }
+.agent-voice-button { flex:0 0 auto; }
 .agent-chat-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .agent-chat-brand { display:flex; align-items:center; gap:11px; }
 .agent-chat-brand > span { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; color:#9fd3ff; background:#214d77; }
@@ -3122,6 +3134,7 @@ body { overflow: hidden; }
 .agent-chat-compose button { min-height:56px; }
 .agent-chat-disclaimer { display:block; margin-top:10px; color:#90a6b8; font-size:11px; line-height:1.5; }
 @media (max-width:720px) { .agent-draft-card, .agent-chat-compose { align-items:stretch; flex-direction:column; } .agent-chat-compose button { width:100%; } .agent-message { max-width:94%; } }
+@media (max-width:720px) { .agent-page-heading { align-items:flex-start; flex-direction:column; gap:12px; } .agent-page-heading h1 { font-size:27px; } .agent-page-tip { width:100%; box-sizing:border-box; } .agent-page-foot { flex-direction:column; gap:5px; } }
 
 /* Role workbenches and high-legibility pass */
 .main-content { font-size: 14px; }
