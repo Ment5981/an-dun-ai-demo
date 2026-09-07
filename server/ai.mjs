@@ -123,23 +123,129 @@ function buildSop(checklist, escalations, insured, citations) {
 }
 
 /**
+ * Build a machine-readable explanation of every stage that contributed to an
+ * analysis.  The UI can render this as an AI activity panel without exposing
+ * a prompt, provider response, or any secret.  Keeping this trace beside the
+ * saved analysis also makes a re-run auditable: reviewers can see which facts,
+ * evidence categories and knowledge records were considered at that time.
+ */
+function buildAiTrace({ generatedAt, category, risk, riskReasons, checklist, evidence, retrieved, citations, escalationReasons, mode = 'rules', model = null }) {
+  const required = Array.isArray(checklist) ? checklist : [];
+  const saved = new Set((Array.isArray(evidence) ? evidence : []).filter(hasSavedEvidence).map(item => item.category));
+  const requiredKeys = new Set(required.map(item => item.category));
+  const availableRequired = [...saved].filter(categoryKey => requiredKeys.has(categoryKey));
+  const missing = required.filter(item => item.priority !== 'available');
+  const sources = (Array.isArray(retrieved) ? retrieved : []).map((item, index) => ({
+    rank: index + 1,
+    id: item.id,
+    title: item.title,
+    type: item.type,
+    version: item.version || null,
+    sourceUrl: item.sourceUrl || null,
+    score: item.score ?? null,
+    matchTerms: Array.isArray(item.matchTerms) ? item.matchTerms.slice(0, 12) : [],
+  }));
+  const providerConfigured = Boolean(process.env.AI_API_KEY);
+  const modelName = model || process.env.AI_MODEL || null;
+  return {
+    pipeline: 'sf-dispute-ai',
+    version: '2026.09-ai-core',
+    generatedAt,
+    status: 'completed',
+    mode,
+    model: modelName,
+    runtime: {
+      providerConfigured,
+      provider: providerConfigured ? (process.env.AI_BASE_URL || 'openai-compatible') : 'local-rules',
+      model: modelName,
+      fallback: mode !== 'llm',
+    },
+    stages: [
+      {
+        id: 'classify',
+        title: '案件分类',
+        status: 'completed',
+        output: category,
+        explanation: category === '其他' ? '案情关键词不足，保留为其他并要求补充澄清。' : '根据已登记案情、货物描述与澄清回答匹配争议类型。',
+      },
+      {
+        id: 'retrieve',
+        title: 'RAG 知识检索',
+        status: sources.length ? 'completed' : 'no_match',
+        output: `${sources.length} 条可追溯来源`,
+        sourceIds: sources.map(source => source.id),
+        explanation: sources.length ? '仅使用知识库中实际命中的来源片段，引用可回链核验。' : '未检索到匹配来源，因此不生成法律引用。',
+      },
+      {
+        id: 'evidence',
+        title: '证据缺口识别',
+        status: 'completed',
+        output: `${availableRequired.length}/${required.length} 类已具备`,
+        missingCategories: missing.map(item => item.category),
+        urgentCategories: missing.filter(item => item.priority === 'immediate').map(item => item.category),
+        explanation: '按争议类型映射固证清单，并将已上传类别与待补类别分开；上传本身不证明内容真实。',
+      },
+      {
+        id: 'risk',
+        title: '责任风险辅助研判',
+        status: 'completed',
+        output: `${risk}风险优先级`,
+        reasons: (riskReasons || []).slice(0, 8),
+        escalationReasons: (escalationReasons || []).slice(0, 8),
+        explanation: '风险等级由服务端规则与证据完整度计算，模型不能改写风险、期限或升级条件。',
+      },
+      {
+        id: 'action',
+        title: '处置建议生成',
+        status: 'completed',
+        output: escalationReasons?.length ? '固定易失证据并申请人工法务复核' : '按清单推进补证、协商与主管核验',
+        explanation: 'SOP 只引用已登记事实、清单和来源，不代替主管或法务作出责任、赔偿或诉讼判断。',
+      },
+    ],
+    evidence: {
+      requiredCategories: required.map(item => item.category),
+      availableCategories: availableRequired,
+      missingCategories: missing.map(item => item.category),
+      uploadedCount: Array.isArray(evidence) ? evidence.filter(item => hasSavedEvidence(item) && requiredKeys.has(item.category)).length : 0,
+    },
+    sources,
+    humanReviewRequired: Boolean((escalationReasons || []).length || !sources.length || missing.length),
+    humanReviewReasons: [
+      ...(escalationReasons || []),
+      ...(missing.length ? ['仍有证据类别待补齐，需人工核验文件内容与来源'] : []),
+      ...(!sources.length ? ['未检索到可追溯知识来源'] : []),
+    ],
+    guardrails: [
+      '模型只能从服务端候选焦点、问题和来源 ID 中选择，不能创建法条、案号、胜诉率或新事实。',
+      '责任风险、证据状态、关键期限和自动升级条件由服务端规则确定。',
+      '输出为辅助研判，需由有权限的主管或人工法务审核后对外使用。',
+    ],
+  };
+}
+
+function updateAiTrace(result, patch = {}) {
+  return { ...result, aiTrace: { ...(result.aiTrace || {}), ...patch } };
+}
+
+/**
  * Optional model reasoning is deliberately constrained to server-defined candidate IDs.
  * It can select/rank fact-linked questions and retrieved citations, but cannot invent
  * statutes, judgments, deadlines, compensation, probabilities, or new evidence facts.
  */
 async function augmentWithModel(result, caseData, retrieved, candidates) {
   const apiKey = process.env.AI_API_KEY;
-  if (!apiKey) return { ...result, fallbackReason: '未配置模型密钥：正在使用本地知识检索与规则分析，可完整演示业务流程。' };
+  if (!apiKey) return updateAiTrace({ ...result, fallbackReason: '未配置模型密钥：正在使用本地知识检索与规则分析，可完整演示业务流程。' }, { mode: 'rules', runtime: { ...(result.aiTrace?.runtime || {}), fallback: true, status: 'not_configured' } });
   const base = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
   let url;
   try { url = new URL(`${base}/chat/completions`); } catch {
-    return { ...result, fallbackReason: '模型服务地址无效，已使用本地知识检索与规则分析。' };
+    return updateAiTrace({ ...result, fallbackReason: '模型服务地址无效，已使用本地知识检索与规则分析。' }, { mode: 'rules', runtime: { ...(result.aiTrace?.runtime || {}), fallback: true, status: 'invalid_endpoint' } });
   }
   if (url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
-    return { ...result, fallbackReason: '模型服务地址未通过校验，已使用本地知识检索与规则分析。' };
+    return updateAiTrace({ ...result, fallbackReason: '模型服务地址未通过校验，已使用本地知识检索与规则分析。' }, { mode: 'rules', runtime: { ...(result.aiTrace?.runtime || {}), fallback: true, status: 'rejected_endpoint' } });
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
+  const startedAt = Date.now();
   try {
     const response = await fetch(url, {
       method: 'POST', signal: controller.signal,
@@ -173,10 +279,10 @@ async function augmentWithModel(result, caseData, retrieved, candidates) {
     const summary = candidates.summaries.find((item) => item.id === chosen.summaryId);
     if (!summary || !Array.isArray(chosen.citationIds) || chosen.citationIds.length === 0 || chosen.citationIds.some((id) => !retrieved.some((item) => item.id === id))) throw new Error('invalid_citation');
     // Every visible string still comes from the controlled server corpus/templates.
-    return { ...result, focusPoints: focus.map((item) => item.text), questions: questions.map(({ id, text }) => ({ id, question: text })), summary: summary.text, mode: 'llm', model: process.env.AI_MODEL || 'gpt-4o-mini', modeDetail: '模型依据检索片段选择并排序争议焦点和澄清问题；责任风险、升级与证据状态由服务器规则确定。' };
+    return updateAiTrace({ ...result, focusPoints: focus.map((item) => item.text), questions: questions.map(({ id, text }) => ({ id, question: text })), summary: summary.text, mode: 'llm', model: process.env.AI_MODEL || 'gpt-4o-mini', modeDetail: '模型依据检索片段选择并排序争议焦点和澄清问题；责任风险、升级与证据状态由服务器规则确定。' }, { mode: 'llm', model: process.env.AI_MODEL || 'gpt-4o-mini', runtime: { ...(result.aiTrace?.runtime || {}), providerConfigured: true, provider: base, model: process.env.AI_MODEL || 'gpt-4o-mini', fallback: false, status: 'completed', latencyMs: Date.now() - startedAt } });
   } catch {
     // Never leak provider response bodies, secrets or case data into errors.
-    return { ...result, fallbackReason: '模型服务暂不可用或返回内容未通过来源校验，已自动使用本地知识检索与规则分析。' };
+    return updateAiTrace({ ...result, fallbackReason: '模型服务暂不可用或返回内容未通过来源校验，已自动使用本地知识检索与规则分析。' }, { mode: 'rules', runtime: { ...(result.aiTrace?.runtime || {}), fallback: true, status: 'provider_error', latencyMs: Date.now() - startedAt } });
   } finally {
     clearTimeout(timeout);
   }
@@ -228,16 +334,18 @@ export async function analyzeCase(caseData = {}, evidence = [], knowledgeItems =
   const questionPool = [...categoryQuestions[category], '相关监控的覆盖时间和保管人是否已经确认？', insured ? '保价条款及其告知记录是否齐全，是否另有保险合同？' : '未保价情况下的寄递约定、货值与实际损失凭证是否齐全？']
     .map((item, index) => ({ id: `q-${index + 1}`, text: item }));
   const summary = `根据已登记案情，暂归类为${category}。已上传 ${checklist.length - missing.length}/${checklist.length} 类建议证据；${escalationReasons.length ? '已触发人工法务复核条件' : missing.length ? '优先补齐易失证据与争议事实' : '进入人工核验与处置审核'}。当前为${risk}风险处置优先级，不代表最终责任结论。`;
+  const generatedAt = new Date().toISOString();
   const result = {
     category, risk, riskReasons, summary, focusPoints: focus.map((item) => item.text),
     questions: questionPool.map(({ id, text: question }) => ({ id, question })), checklist,
     sop: buildSop(checklist, escalationReasons, insured, citations), citations, escalationReasons,
     nextAction: escalationReasons.length ? '固定易失证据，同时转交人工法务复核' : urgent.length ? `立即固定：${urgent[0].title}` : missing.length ? `补充：${missing[0].title}` : '提交主管核验并确定处置方案',
-    mode: 'rules', generatedAt: new Date().toISOString(), disclaimer: DISCLAIMER,
+    mode: 'rules', generatedAt, disclaimer: DISCLAIMER,
     evidenceReview: '未自动读取图片、视频或文件正文；当前分析基于案情、澄清回答、已上传类别和检索知识。',
   };
-  if (!retrieved.length) return { ...result, fallbackReason: '未检索到匹配知识，未生成法律引用；请由法务补充适用来源。' };
-  if (caseData._rulesOnly === true) return { ...result, fallbackReason: '演示初始化使用本地知识检索与规则分析。' };
+  result.aiTrace = buildAiTrace({ generatedAt, category, risk, riskReasons, checklist, evidence, retrieved, citations, escalationReasons });
+  if (!retrieved.length) return updateAiTrace({ ...result, fallbackReason: '未检索到匹配知识，未生成法律引用；请由法务补充适用来源。' }, { runtime: { ...(result.aiTrace.runtime || {}), status: 'no_retrieval', fallback: true } });
+  if (caseData._rulesOnly === true) return updateAiTrace({ ...result, fallbackReason: '演示初始化使用本地知识检索与规则分析。' }, { runtime: { ...(result.aiTrace.runtime || {}), status: 'rules_only', fallback: true } });
   return augmentWithModel(result, caseData, retrieved, {
     focus, questions: questionPool,
     summaries: [{ id: 'summary-standard', text: summary }, { id: 'summary-action', text: `${summary} 下一步：${result.nextAction}。` }],
