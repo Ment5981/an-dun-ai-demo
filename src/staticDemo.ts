@@ -93,6 +93,13 @@ export async function staticApi<T>(path: string, options: RequestInit = {}): Pro
   }
   if (route === '/auth/logout' && method === 'POST') { currentUser = null; return {} as T; }
   if (!currentUser) throw new Error('请先登录');
+  if (route === '/agent/chat' && method === 'POST') {
+    const body = bodyOf(options); const messages = Array.isArray(body.messages) ? body.messages : []; const text = messages.filter((m: any) => m?.role === 'user').map((m: any) => String(m.content || '')).join(' ');
+    const amountMatch = text.match(/(?:赔偿|索赔|损失|金额)[^0-9]{0,8}(\d+(?:\.\d+)?)/); const amount = amountMatch ? Number(amountMatch[1]) : null;
+    const category = /破损|碎|裂|挤压/.test(text) ? '破损' : /丢失|没收到|未收到/.test(text) ? '丢失' : /签收/.test(text) ? '签收争议' : '其他';
+    const goods = /相机|手机|电脑|包裹|快件/.exec(text)?.[0] || '待确认货物';
+    return { mode: 'rules', model: null, reply: category === '破损' ? '已识别为破损争议。请先保留外包装、内件、开箱影像，并核对签收时是否当场验货。' : '我先记录这起纠纷。请补充发生时间、货物状态、客户诉求，以及目前已经保留的照片、聊天或监控。', questions: ['发生时间和运单号是什么？', '现在手上有哪些原始证据？'], draft: text.length > 8 ? { title: `${goods}${category}纠纷`, goods, amount, category, description: text } : null, disclaimer: 'AI 仅辅助整理事实和证据，不替代主管或法务决策。' } as T;
+  }
   if (route === '/cases' && method === 'POST') {
     const body = bodyOf(options);
     const item: CaseItem = { ...clone(staticCase), id: `static-new-${Date.now()}`, title: body.title || '演示纠纷案件', waybill: body.waybill || 'SF-DEMO-NEW', description: body.description || '演示案情待补充。', goods: body.goods || '待确认货物', amount: Number(body.amount) || 0, createdAt: stamp(), updatedAt: stamp(), ownerId: currentUser.id, ownerName: currentUser.name, org: currentUser.org, status: '取证中', escalated: false, evidence: [], evidenceCount: 0, completeness: 0, documents: [], tasks: [], timeline: [], clarificationAnswers: {} };
