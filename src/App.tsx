@@ -77,7 +77,7 @@ export default function App() {
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),6000);return()=>clearTimeout(t);},[toast]);
   const go=(p:Page)=>{setPage(p);setMobile(false);};const openCase=(id:string)=>{setSelected(id);go('case');};
   const startAgentCase=(draft:AgentDraft)=>{setAgentDraft(draft);go('intake');};
-  const logout=async()=>{try{await post('/auth/logout');setUser(null);setCases([]);setTasks([]);setSelected('');setPage('workbench');}catch(e){notify((e as Error).message,true);}};
+  const logout=async()=>{try{await post('/auth/logout');setUser(null);setCases([]);setTasks([]);setSelected('');setPage('agent');}catch(e){notify((e as Error).message,true);}};
   if(boot)return <div className="boot"><Brand/><Spinner label="连接案件工作台…"/></div>;
   if(!user)return <Login onLogin={setUser} serverError={bootError}/>;
   const nav=[{id:'agent',label:'AI 案件助手',icon:<Sparkle24Regular/>},{id:'workbench',label:user.role==='courier'?'我的现场工作台':user.role==='supervisor'?'网点案件指挥台':'法务接收与复核',icon:<Home24Regular/>},...(user.role!=='legal'?[{id:'intake',label:'新建纠纷案件',icon:<Add24Regular/>}]:[]),{id:'tasks',label:user.role==='legal'?'法务复核任务':user.role==='supervisor'?'主管协同任务':'我的固证任务',icon:<TaskListSquareLtr24Regular/>},{id:'knowledge',label:'法律依据与经验库',icon:<BookOpen24Regular/>},...(user.role!=='courier'?[{id:'audit',label:'操作审计',icon:<History24Regular/>}]:[])];

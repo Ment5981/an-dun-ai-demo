@@ -17,10 +17,10 @@ async function login() {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await Promise.race([
     page.getByRole('button', { name: '进入工作台' }).waitFor(),
-    page.getByRole('heading', { name: /先说发生了什么|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor(),
+    page.getByRole('heading', { name: /你好，今天需要处理什么？|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor(),
   ]);
   if (await page.getByRole('button', { name: '进入工作台' }).count()) await page.getByRole('button', { name: '进入工作台' }).click();
-  await page.getByRole('heading', { name: /先说发生了什么|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor();
+  await page.getByRole('heading', { name: /你好，今天需要处理什么？|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor();
 }
 function assert(condition, message) { if (!condition) throw new Error(message); }
 async function metrics() { return page.evaluate(() => ({ bodyWidth: document.body.scrollWidth, viewportWidth: innerWidth })); }
@@ -52,10 +52,10 @@ const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
 await mobile.goto(baseUrl, { waitUntil: 'networkidle' });
 await Promise.race([
   mobile.getByRole('button', { name: '进入工作台' }).waitFor(),
-  mobile.getByRole('heading', { name: /先说发生了什么|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor(),
+  mobile.getByRole('heading', { name: /你好，今天需要处理什么？|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor(),
 ]);
 if (await mobile.getByRole('button', { name: '进入工作台' }).count()) await mobile.getByRole('button', { name: '进入工作台' }).click();
-await mobile.getByRole('heading', { name: /先说发生了什么|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor();
+await mobile.getByRole('heading', { name: /你好，今天需要处理什么？|案件工作台|我的案件工作台|法务工作台|我的现场工作台|网点案件指挥台|法务接收与复核/ }).waitFor();
 const mobileMetrics = await mobile.evaluate(() => ({ bodyWidth: document.body.scrollWidth, viewportWidth: innerWidth }));
 assert(mobileMetrics.bodyWidth <= mobileMetrics.viewportWidth + 1, 'mobile page has horizontal overflow');
 await mobile.screenshot({ path: path.join(output, '06-mobile.png'), fullPage: true });
